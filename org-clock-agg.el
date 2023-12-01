@@ -28,15 +28,40 @@
 ;; TODO
 
 ;;; Code:
-(require 'compat)
+(require 'font-lock)
+(require 'outline)
 (require 'org)
+(require 'seq)
+(require 'widget)
+
+(require 'compat)
 (require 'org-ql)
+
+(defgroup org-clock-agg nil
+  "Aggregate org-clock statistics."
+  :group 'org-clock)
+
+(defface org-clock-agg-group-face
+  '((t :inherit font-lock-comment-face))
+  "Face for group names in org-clock-agg tree views."
+  :group 'org-clock-agg)
+
+(defface org-clock-agg-duration-face
+  '((t :inherit font-lock-constant-face))
+  "Face for durations in org-clock-agg tree views."
+  :group 'org-clock-agg)
+
+(defcustom org-clock-agg-duration-format "%h:%.2m"
+  "Format string for durations in org-clock-agg views.
+
+See `format-seconds' for the list of available format specifiers."
+  :type 'string
+  :group 'org-clock-agg)
 
 ;; Reset org-ql cache
 (setq org-ql-cache (make-hash-table :weakness 'key))
 
 ;;; Querying
-
 (defun org-clock-agg--parse-clocks (headline)
   (let ((contents (buffer-substring-no-properties
                    (org-element-property :contents-begin headline)
@@ -75,11 +100,6 @@
                         (org-ql--outline-path)))
          (category (org-get-category)))
     (org-ql--add-markers headline)
-    ;; Just to make the output more tolerable
-    ;; (setf
-    ;;  (plist-get (cadr (alist-get :headline headline)) :todo-keyword)
-    ;;  (substring-no-properties
-    ;;   (plist-get (cadr (alist-get :headline headline)) :todo-keyword)))
     (cl-loop for clock in (org-clock-agg--parse-clocks headline)
              collect`(,@clock
                       (:headline . ,headline)
@@ -109,19 +129,18 @@
     (while-let ((symbol (and
                          (member (car-safe body) '(:hidden :readable-name))
                          (car-safe body))))
-      (when (eq :hidden symbol)
-        (setq hidden (cadr body)))
-      (when (eq :readable-name symbol)
-        (setq readable-name (cadr body)))
+      (when (eq :hidden symbol) (setq hidden (cadr body)))
+      (when (eq :readable-name symbol) (setq readable-name (cadr body)))
       (setq body (cddr body)))
     `(progn
        (defun ,func-name (elem)
          ,doc
          ,@body)
+       (unless readable-name
+         (setq readable-name (symbol-name name)))
        (push (cons ',name '((:function . ,func-name)
                             (:hidden . ,hidden)
-                            (:readable-name . ,(or readable-name
-                                                   (symbol-name name)))))
+                            (:readable-name . ,readable-name)))
              org-clock-agg-groupby))))
 
 (org-clock-agg-defgroupby category
@@ -175,6 +194,67 @@
                         group-values))))
         (setq res (org-clock-agg--groupby-apply res groups elem))))
     res))
+
+(defun org-clock-agg--groupby-sort (tree)
+  (setq tree (seq-sort-by (lambda (elem)
+                            (alist-get :total elem))
+                          #'> tree))
+  (dolist (elem tree)
+    (let ((children (alist-get :children elem)))
+      (when children
+        (setf (alist-get :children elem)
+              (org-clock-agg--groupby-sort children)))))
+  tree)
+
+;; View results
+(defun org-clock-agg-quit ()
+  (interactive)
+  (quit-window t))
+
+(defvar org-clock-agg-tree-mode-map
+  (let ((keymap (make-sparse-keymap)))
+    (define-key keymap (kbd "q") #'org-clock-agg-quit)
+    (define-key keymap (kbd "<tab>") #'outline-toggle-children)
+    (when (fboundp 'evil-define-key*)
+      (evil-define-key* 'normal keymap
+        "q" #'org-clock-agg-quit
+        "<tab>" #'outline-toggle-children))
+    keymap))
+
+(define-derived-mode org-clock-agg-tree-mode special-mode "Org Clock Agg Tree"
+  "Major mode for viewing org-clock-agg results."
+  (outline-minor-mode 1))
+
+(defun org-clock-agg--render-tree-elem (elem &optional level)
+  (unless level
+    (setq level 1))
+  (let ((level-face (nth (mod (1- level) 8)  org-level-faces))
+        (level-string (make-string level ?*)))
+    (insert
+     (format "%-50s %20s %8s"
+             (propertize (concat level-string " " (car elem))
+                         'face level-face)
+             (propertize
+              (alist-get :readable-name (alist-get :groupby (cdr elem)))
+              'face 'org-clock-agg-group-face)
+             (propertize
+              (format-seconds
+               org-clock-agg-duration-format
+               (alist-get :total (cdr elem)))
+              'face 'org-clock-agg-duration-face))
+     "\n"))
+  (mapc (lambda (child)
+          (org-clock-agg--render-tree-elem child (1+ level)))
+        (alist-get :children (cdr elem))))
+
+(defun org-clock-agg--render-tree (tree)
+  (let ((buffer (generate-new-buffer "*org-clock-agg*")))
+    (with-current-buffer buffer
+      (org-clock-agg-tree-mode)
+      (let ((inhibit-read-only t))
+        (mapc #'org-clock-agg--render-tree-elem tree))
+      (goto-char (point-min)))
+    (switch-to-buffer buffer)))
 
 (provide 'org-clock-agg)
 ;;; org-clock-agg.el ends here
