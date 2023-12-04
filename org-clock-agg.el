@@ -71,6 +71,7 @@ See `format-seconds' for the list of available format specifiers."
 ;; Reset org-ql cache
 (setq org-ql-cache (make-hash-table :weakness 'key))
 (setq org-clock-agg-groupby nil)
+(setq org-clock-agg-sort nil)
 
 ;;; Querying
 (defun org-clock-agg--parse-clocks (headline)
@@ -130,44 +131,71 @@ See `format-seconds' for the list of available format specifiers."
 (defvar org-clock-agg-groupby nil
   "Group by functions.")
 
-(defmacro org-clock-agg--extract-params (body &rest params)
-  `(while-let ((symbol (and
-                        (member (car-safe body) ',params)
-                        (car-safe body))))
-     ,@(mapcar
-        (lambda (param)
-          `(when (eq symbol ,param)
-             (setq ,(intern (substring (symbol-name param) 1)) (cadr body))))
-        params)
-     (setq body (cddr body))))
+(defvar org-clock-agg-sort nil
+  "Sort functions.")
 
-(cl-defmacro org-clock-agg-defgroupby (name doc &body body)
+;; XXX This looks like reinventing the wheel... IDK.
+(defmacro org-clock-agg--extract-params (body &rest params)
+  `(let ((body-wo-docstring (if (stringp (car-safe body)) (cdr body) body))
+         (docstring (when (stringp (car-safe body)) (car-safe body))))
+     (while-let ((symbol (and
+                          (member (car-safe body-wo-docstring) ',params)
+                          (car-safe body-wo-docstring))))
+       ,@(mapcar
+          (lambda (param)
+            `(when (eq symbol ,param)
+               (setq ,(intern (substring (symbol-name param) 1)) (cadr body-wo-docstring))))
+          params)
+       (setq body-wo-docstring (cddr body-wo-docstring)))
+     (if docstring
+         (setq body (cons docstring body-wo-docstring))
+       (setq body body-wo-docstring))))
+
+(cl-defmacro org-clock-agg-defgroupby (name &body body)
   (declare (indent defun)
            (doc-string 2))
   (let ((func-name (intern (concat "org-clock-agg--groupby-" (symbol-name name))))
-        readable-name
-        hidden)
+        readable-name hidden default-sort)
     ;; Parse keyword arguments in BODY
-    (org-clock-agg--extract-params body :readable-name :hidden)
+    (org-clock-agg--extract-params body :readable-name :hidden
+                                   :default-sort)
     (unless readable-name
       (setq readable-name (symbol-name name)))
     `(progn
        (defun ,func-name (elem)
-         ,doc
+         ,@body)
+       (push (cons ',name '((:symbol . ,name)
+                            (:function . ,func-name)
+                            (:hidden . ,hidden)
+                            (:readable-name . ,readable-name)
+                            (:default-sort . ,default-sort)))
+             org-clock-agg-groupby))))
+
+(cl-defmacro org-clock-agg-defsort (name &body body)
+  (declare (indent defun)
+           (doc-string 2))
+  (let ((func-name (intern (concat "org-clock-agg--sort-" (symbol-name name))))
+        readable-name)
+    (org-clock-agg--extract-params body :readable-name)
+    (unless readable-name
+      (setq readable-name (symbol-name name)))
+    `(progn
+       (defun ,func-name (elems)
          ,@body)
        (push (cons ',name '((:function . ,func-name)
-                            (:hidden . ,hidden)
                             (:readable-name . ,readable-name)))
-             org-clock-agg-groupby))))
+             org-clock-agg-sort))))
 
 (org-clock-agg-defgroupby category
   "Group org-clock entries by category."
   :readable-name "Category"
+  :default-sort total
   (list (alist-get :category elem)))
 
 (org-clock-agg-defgroupby org-file
   "Group org-clock entries by file in `org-directory'."
   :readable-name "Org file"
+  :default-sort total
   (list
    (file-relative-name (alist-get :file elem)
                        (directory-file-name org-directory))))
@@ -175,17 +203,70 @@ See `format-seconds' for the list of available format specifiers."
 (org-clock-agg-defgroupby outline-path
   "Group org-clock entries by outline path."
   :readable-name "Outline path"
+  :default-sort total
   (alist-get :outline-path elem))
+
+(org-clock-agg-defgroupby tags
+  "Group org-clock entries by tags."
+  :readable-name "Tags"
+  :default-sort total
+  (seq-sort
+   #'string-lessp
+   (alist-get :tags elem)))
+
+(org-clock-agg-defgroupby headline
+  "Group org-clock entries by headline."
+  :readable-name "Headline"
+  :default-sort total
+  (list (org-element-property :raw-value (alist-get :headline elem))))
 
 (org-clock-agg-defgroupby root-group
   "Return \"Root\".  Used for the root group."
   :readable-name "Root"
+  :default-sort total
   :hidden t
   (list "Results"))
 
+(org-clock-agg-defsort name
+  "Sort by name."
+  :readable-name "Name"
+  (seq-sort-by (lambda (elem) (alist-get :name elem)) #'string-lessp elems))
+
+(org-clock-agg-defsort total
+  "Sort by total time spent."
+  :readable-name "Total time"
+  (seq-sort-by (lambda (elem) (alist-get :total elem)) #'> elems))
+
+(org-clock-agg-defsort start-time
+  "Sort by start time."
+  :readable-name "Start time"
+  (seq-sort-by
+   (lambda (elem)
+     (thread-last elem
+                  (list)
+                  (org-clock-agg--ungroup)
+                  (mapcar (lambda (row-elem) (alist-get :start row-elem)))
+                  (seq-min)))
+   #'> elem))
+
+(org-clock-agg-defsort end-time
+  "Sort by end time."
+  :readable-name "End time"
+  (seq-sort-by
+   (lambda (elem)
+     (thread-last elem
+                  (list)
+                  (org-clock-agg--ungroup)
+                  (mapcar (lambda (row-elem) (alist-get :end row-elem)))
+                  (seq-max)))
+   #'> elem))
+
 (defun org-clock-agg--groupby-apply (alist groups elem)
-  (let* ((key (caar groups))
-         (groupby (cdar groups))
+  (let* ((group-params (car groups))
+         (key (nth 0 group-params))
+         (groupby (nth 1 group-params))
+         (sort (nth 2 group-params))
+         (sort-order (nth 3 group-params))
          (rest (cdr groups))
          (duration (alist-get :duration elem))
          (prev-val (alist-get key alist nil nil #'equal)))
@@ -195,41 +276,95 @@ See `format-seconds' for the list of available format specifiers."
               (:groupby . ,groupby)
               (:children . ,(org-clock-agg--groupby-apply
                              (alist-get :children prev-val) rest elem))
+              (:sort-symbol . ,sort)
+              (:sort-order . ,sort-order)
               (:elems . ,(if rest
                              (alist-get :elems prev-val)
                            (cons elem (alist-get :elems prev-val))))))))
   alist)
 
-(defun org-clock-agg--groupby (elems groupby-list)
+(defun org-clock-agg--groupby (elems groupby-list sort-list sort-order-list)
   (let (res)
     (dolist (elem elems)
       (let* ((group-symbols (cons 'root-group groupby-list))
+             (sort-symbols (cons 'total sort-list))
+             (sort-orders (cons nil sort-order-list))
              (groups
               (cl-loop for group-symbol in group-symbols
+                       for sort-symbol in sort-symbols
+                       for sort-order in sort-orders
                        for groupby = (alist-get group-symbol org-clock-agg-groupby)
                        for group-values = (funcall (alist-get :function groupby) elem)
                        append
                        (mapcar
                         (lambda (group-value)
-                          (cons group-value groupby))
+                          (list group-value groupby sort-symbol sort-order))
                         group-values))))
         (setq res (org-clock-agg--groupby-apply res groups elem))))
     res))
 
-(defun org-clock-agg--groupby-sort (tree sort)
-  (setq tree (seq-sort-by (lambda (elem)
-                            (alist-get :total elem))
-                          #'> tree))
-  (dolist (elem tree)
-    (let ((children (alist-get :children elem)))
-      (when children
-        (setf (alist-get :children elem)
-              (org-clock-agg--groupby-sort children sort)))))
-  tree)
+(defun org-clock-agg--ungroup (tree)
+  (cl-loop for tree-elem in tree
+           append (alist-get :elems tree-elem)
+           append (org-clock-agg--ungroup (alist-get :children elem))))
+
+(defun org-clock-agg--groupby-sort (tree)
+  (let* ((sorted-nodes-by-group
+          (thread-last
+            tree
+            (mapcar (lambda (node) (cons (cons :name (car node)) (cdr node))))
+            (seq-group-by
+             (lambda (node)
+               (list (alist-get :symbol (alist-get :groupby node))
+                     (alist-get :sort-symbol node)
+                     (alist-get :sort-order node))))
+            (mapcar
+             (lambda (grouped)
+               (let ((group-symbol (nth 0 (car grouped)))
+                     (sort-symbol (nth 1 (car grouped)))
+                     (sort-order (nth 2 (car grouped))))
+                 (setf (cdr grouped)
+                       (funcall (thread-last org-clock-agg-sort
+                                             (alist-get sort-symbol)
+                                             (alist-get :function))
+                                (cdr grouped)))
+                 (when sort-order
+                   (setf (cdr grouped) (reverse (cdr grouped))))
+                 grouped)))
+            (seq-sort-by
+             (lambda (grouped)
+               (thread-last org-clock-agg-groupby
+                            (alist-get (car (car grouped)))
+                            (alist-get :readable-name)))
+             #'string-lessp)))
+         (tree (seq-reduce (lambda (acc grouped)
+                             (append (cdr grouped) acc))
+                           sorted-nodes-by-group nil)))
+    (dolist (node tree)
+      (let ((children (alist-get :children node))
+            (elems (alist-get :elems node)))
+        (when children
+          (setf (alist-get :children node)
+                (org-clock-agg--groupby-sort children)))
+        (when elems
+          (setf (alist-get :elems node)
+                (seq-sort-by (lambda (elem) (alist-get :start elem))
+                             #'>
+                             (alist-get :elems node))))))
+    (mapcar (lambda (node)
+              (cons (alist-get :name node)
+                    node))
+            tree)))
 
 ;; View & manage results
 (defvar-local org-clock-agg--params nil
   "Parameters for the current org-clock-agg buffer.")
+
+(defvar-local org-clock-agg--elems nil
+  "Elements for the current org-clock-agg buffer.")
+
+(defvar-local org-clock-agg--tree nil
+  "Tree for the current org-clock-agg buffer.")
 
 (defun org-clock-agg-quit ()
   (interactive)
@@ -251,9 +386,7 @@ See `format-seconds' for the list of available format specifiers."
   "Major mode for viewing org-clock-agg results."
   (outline-minor-mode 1))
 
-(defun org-clock-agg--render-controls ()
-  (remove-overlays)
-  (insert (propertize "* Parameters" 'face 'org-level-1) "\n")
+(defun org-clock-agg--render-controls-files ()
   (apply
    #'widget-create 'menu-choice
    :tag "Files"
@@ -271,9 +404,20 @@ See `format-seconds' for the list of available format specifiers."
                      :entry-format "%i %d %v"
                      :menu-tag "Custom list"
                      :value nil
-                     (editable-field :tag "File" :value "")))))
-  (insert "\n")
+                     (editable-field :tag "File" :value ""))))))
 
+(defun org-clock-agg--validate-date (widget)
+  (let ((date (widget-value widget)))
+    (unless (or (not (stringp date))
+                (and
+                 (not (string-match-p (rx bos (? "-") (+ digit) eos) date))
+                 (not (and (decoded-time-year val)
+                           (decoded-time-month val)
+                           (decoded-time-day val)))))
+      (widget-put widget :error "Enter number or date in format YYYY-MM-DD")
+      widget)))
+
+(defun org-clock-agg--render-controls-date ()
   (widget-create 'editable-field
                  :size 20
                  :format (concat (propertize "Date from: " 'face 'widget-button) "%v   ")
@@ -281,6 +425,7 @@ See `format-seconds' for the list of available format specifiers."
                           (if (numberp val)
                               (number-to-string val)
                             val))
+                 :validate #'org-clock-agg--validate-date
                  :notify (lambda (widget &rest ignore)
                            (let ((val (widget-value widget)))
                              (when (string-match-p (rx bos (? "-") (+ digit) eos) val)
@@ -294,34 +439,72 @@ See `format-seconds' for the list of available format specifiers."
                           (if (numberp val)
                               (number-to-string val)
                             val))
+                 :validate #'org-clock-agg--validate-date
                  :notify (lambda (widget &rest ignore)
                            (let ((val (widget-value widget)))
                              (when (string-match-p (rx bos (? "-") (+ digit) eos) val)
                                (setq val (string-to-number val)))
-                             (setf (alist-get :to org-clock-agg--params) val))))
-  (insert "\n\n")
+                             (setf (alist-get :to org-clock-agg--params) val)))))
 
+(defun org-clock-agg--render-controls-groupby ()
   (insert (propertize "Group by: " 'face 'widget-button) "\n")
   (widget-create 'editable-list
                  :tag "Group by"
                  :entry-format "%i %d %v"
-                 :value (alist-get :groupby org-clock-agg--params)
+                 :value (cl-loop for group-value in (alist-get :groupby org-clock-agg--params)
+                                 for sort-value in (alist-get :sort org-clock-agg--params)
+                                 for sort-order-value in (alist-get :sort-order org-clock-agg--params)
+                                 collect (list group-value sort-value sort-order-value))
                  :notify
-                 (lambda (widget &rest ignore)
-                   (setf (alist-get :groupby org-clock-agg--params)
-                         (widget-value widget)))
-                 `(menu-choice
-                   :tag "Group"
-                   ,@(thread-last
-                       org-clock-agg-groupby
-                       (seq-filter (lambda (groupby)
-                                     (not (alist-get :hidden (cdr groupby)))))
-                       (mapcar (lambda (groupby)
-                                 (let ((name (car groupby))
-                                       (readable-name (alist-get :readable-name (cdr groupby))))
-                                   `(item :tag ,readable-name
-                                          :value ,name
-                                          :menu-tag ,readable-name)))))))
+                 (lambda (widget changed-widget &optional event)
+                   (let ((group-value (mapcar #'car (widget-value widget)))
+                         (sort-value (mapcar #'cadr (widget-value widget)))
+                         (sort-order-value (mapcar #'caddr (widget-value widget))))
+                     (setf (alist-get :groupby org-clock-agg--params) group-value)
+                     (setf (alist-get :sort org-clock-agg--params) sort-value)
+                     (setf (alist-get :sort-order org-clock-agg--params) sort-order-value)))
+                 `(group
+                   :value (outline-path total)
+                   (menu-choice
+                    :tag "Group"
+                    :notify (lambda (widget _child &optional event)
+                              (if-let* ((value (widget-value widget))
+                                        (default-sort (alist-get
+                                                       :default-sort
+                                                       (alist-get value org-clock-agg-groupby)))
+                                        (parent (widget-get widget :parent)))
+                                  (widget-value-set parent (list value default-sort)))
+                              (widget-default-action widget event))
+                    ,@(thread-last
+                        org-clock-agg-groupby
+                        (seq-filter (lambda (groupby)
+                                      (not (alist-get :hidden (cdr groupby)))))
+                        (mapcar (lambda (groupby)
+                                  (let ((name (car groupby))
+                                        (readable-name (alist-get :readable-name (cdr groupby))))
+                                    `(item :tag ,readable-name
+                                           :value ,name
+                                           :menu-tag ,readable-name))))))
+                   (menu-choice
+                    :tag "Order"
+                    ,@(mapcar
+                       (lambda (sort)
+                         (let ((name (car sort))
+                               (readable-name (alist-get :readable-name (cdr sort))))
+                           `(item :tag ,readable-name
+                                  :value ,name
+                                  :menu-tag ,readable-name)))
+                       org-clock-agg-sort))
+                   (toggle :on "Reverse order" :off "Normal order"))))
+
+(defun org-clock-agg--render-controls ()
+  (remove-overlays)
+  (insert (propertize "* Parameters" 'face 'org-level-1) "\n")
+  (org-clock-agg--render-controls-files)
+  (insert "\n")
+  (org-clock-agg--render-controls-date)
+  (insert "\n\n")
+  (org-clock-agg--render-controls-groupby)
   (insert "\n")
   (widget-create 'push-button
                  :notify (lambda (&rest ignore)
@@ -370,12 +553,14 @@ See `format-seconds' for the list of available format specifiers."
 
 (defun org-clock-agg-refresh ()
   (interactive)
-  (cl-destructuring-bind (&key from to files groupby sort)
+  (cl-destructuring-bind (&key from to files groupby sort sort-order)
       (cl--alist-to-plist org-clock-agg--params)
     (let* ((files (org-clock-agg--parse-files files))
            (elems (org-clock-agg--query from to files))
-           (tree (org-clock-agg--groupby elems groupby))
-           (tree (org-clock-agg--groupby-sort tree sort)))
+           (tree (org-clock-agg--groupby elems groupby sort sort-order))
+           (tree (org-clock-agg--groupby-sort tree)))
+      (setq-local org-clock-agg--elems elems)
+      (setq-local org-clock-agg--tree tree)
       (save-excursion
         (let ((inhibit-read-only t))
           (goto-char (point-min))
@@ -384,11 +569,10 @@ See `format-seconds' for the list of available format specifiers."
           (delete-region (point) (point-max))
           (mapc #'org-clock-agg--render-tree-elem tree))))))
 
-(defun org-clock-agg (from to files groupby sort)
-  (interactive (list -7 0 'org-agenda nil nil))
+(defun org-clock-agg (from to files groupby sort sort-order)
+  (interactive (list -7 0 'org-agenda nil nil nil))
   (let* ((buffer (generate-new-buffer "*org-clock-agg*")))
     (switch-to-buffer-other-window buffer)
-
     (with-current-buffer buffer
       (org-clock-agg-tree-mode)
       (setq-local org-clock-agg--params
@@ -396,7 +580,8 @@ See `format-seconds' for the list of available format specifiers."
                     (:to . ,to)
                     (:files . ,files)
                     (:groupby . ,groupby)
-                    (:sort . ,sort)))
+                    (:sort . ,sort)
+                    (:sort-order . ,sort-order)))
       (let ((inhibit-read-only t))
         (org-clock-agg--render-controls)
         (org-clock-agg-refresh))
