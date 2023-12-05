@@ -51,7 +51,29 @@ See `format-seconds' for the list of available format specifiers."
 
 (defcustom org-clock-agg-files-preset nil
   "Presets for the \"files\" parameter in org-clock-agg views."
-  :type '(alist :key-type string :value-type (repeat string)))
+  :type '(alist :key-type string :value-type (repeat string))
+  :group 'org-clock-agg)
+
+(defcustom org-clock-agg-day-format "%Y-%m-%d, %a"
+  "Format string for days in org-clock-agg views.
+
+See `format-time-string' for the list of available format specifiers."
+  :type 'string
+  :group 'org-clock-agg)
+
+(defcustom org-clock-agg-week-format "%Y-%W"
+  "Format string for weeks in org-clock-agg views.
+
+See `format-time-string' for the list of available format specifiers."
+  :type 'string
+  :group 'org-clock-agg)
+
+(defcustom org-clock-agg-month-format "%Y-%m"
+  "Format string for months in org-clock-agg views.
+
+See `format-time-string' for the list of available format specifiers."
+  :type 'string
+  :group 'org-clock-agg)
 
 (defface org-clock-agg-group-face
   '((t :inherit font-lock-comment-face))
@@ -66,6 +88,13 @@ See `format-seconds' for the list of available format specifiers."
 (defface org-clock-agg-param-face
   '((t :inherit font-lock-variable-name-face))
   "Face for parameters in org-clock-agg tree views."
+  :group 'org-clock-agg)
+
+(defface org-clock-agg-elem-face nil
+  "Face for elements in org-clock-agg tree views.
+
+It's probably supposed to be nil because it overrides the default
+element formatting."
   :group 'org-clock-agg)
 
 ;; Reset org-ql cache
@@ -219,6 +248,43 @@ See `format-seconds' for the list of available format specifiers."
   :readable-name "Headline"
   :default-sort total
   (list (org-element-property :raw-value (alist-get :headline elem))))
+
+(org-clock-agg-defgroupby day
+  :readable-name "Day"
+  :default-sort start-time
+  (list (thread-last elem
+                     (alist-get :start)
+                     (seconds-to-time)
+                     (format-time-string org-clock-agg-day-format))))
+
+(org-clock-agg-defgroupby week
+  :readable-name "Week"
+  :default-sort start-time
+  (list (thread-last elem
+                     (alist-get :start)
+                     (seconds-to-time)
+                     (format-time-string org-clock-agg-week-format))))
+
+(org-clock-agg-defgroupby month
+  :readable-name "Month"
+  :default-sort start-time
+  (list (thread-last elem
+                     (alist-get :start)
+                     (seconds-to-time)
+                     (format-time-string org-clock-agg-month-format))))
+
+(org-clock-agg-defgroupby todo
+  :readable-name "TODO keyword"
+  :default-sort total
+  (list (substring-no-properties
+         (org-element-property :todo-keyword (alist-get :headline elem)))))
+
+(org-clock-agg-defgroupby is-done
+  :readable-name "Is done"
+  :default-sort total
+  (list (if (eq (org-element-property :todo-type (alist-get :headline elem)) 'done)
+            "Done"
+          "Not done")))
 
 (org-clock-agg-defgroupby root-group
   "Return \"Root\".  Used for the root group."
@@ -497,6 +563,15 @@ See `format-seconds' for the list of available format specifiers."
                        org-clock-agg-sort))
                    (toggle :on "Reverse order" :off "Normal order"))))
 
+(defun org-clock-agg--render-switches ()
+  (insert (propertize "Show elements: " 'face 'widget-button))
+  (widget-create 'checkbox
+                 :notify (lambda (widget &rest ignore)
+                           (setf (alist-get :show-elems org-clock-agg--params)
+                                 (widget-value widget)))
+                 nil)
+  (insert "\n"))
+
 (defun org-clock-agg--render-controls ()
   (remove-overlays)
   (insert (propertize "* Parameters" 'face 'org-level-1) "\n")
@@ -505,6 +580,8 @@ See `format-seconds' for the list of available format specifiers."
   (org-clock-agg--render-controls-date)
   (insert "\n\n")
   (org-clock-agg--render-controls-groupby)
+  (insert "\n")
+  (org-clock-agg--render-switches)
   (insert "\n")
   (widget-create 'push-button
                  :notify (lambda (&rest ignore)
@@ -519,7 +596,52 @@ See `format-seconds' for the list of available format specifiers."
         (concat (substring string 0 (- max-len 3)) "...")
       string)))
 
-(defun org-clock-agg--render-tree-node (node &optional level)
+(defun org-clock-agg--goto-elem (elem)
+  (let ((marker (org-element-property :org-marker (alist-get :headline elem))))
+    (org-goto-marker-or-bmk marker)))
+
+(defun org-clock-agg-render-tree-node-elems (node)
+  (when-let ((elems (alist-get :elems (cdr node)))
+             (widget-push-button-prefix "")
+             (widget-push-button-suffix ""))
+    (dolist (elem elems)
+      (let ((elem-name
+             (format
+              "- [%s]--[%s] => %s : %s"
+              (propertize
+               (thread-last elem
+                            (alist-get :start)
+                            (seconds-to-time)
+                            (format-time-string (cdr org-time-stamp-formats)))
+               'face 'org-date)
+              (propertize
+               (thread-last elem
+                            (alist-get :end)
+                            (seconds-to-time)
+                            (format-time-string (cdr org-time-stamp-formats)))
+               'face 'org-date)
+              (org-duration-from-minutes
+               (/ (alist-get :duration elem) 60))
+              (concat
+               (when-let ((todo-keyword (substring-no-properties
+                                         (org-element-property
+                                          :todo-keyword
+                                          (alist-get :headline elem)))))
+                 (propertize
+                  (concat todo-keyword " ") 'face
+                  (if (eq (org-element-property :todo-type (alist-get :headline elem)) 'done)
+                      'org-done 'org-todo)))
+               (org-element-property :raw-value (alist-get :headline elem))))))
+        (widget-create 'push-button
+                       :elem elem
+                       :notify (lambda (widget &rest ignore)
+                                 (let ((elem (widget-get widget :elem)))
+                                   (org-clock-agg--goto-elem elem)))
+                       :button-face 'org-clock-agg-elem-face
+                       elem-name))
+      (insert "\n"))))
+
+(defun org-clock-agg--render-tree-node (node show-elems &optional level)
   (unless level
     (setq level 1))
   (let ((level-face (nth (mod (1- level) 8)  org-level-faces))
@@ -539,9 +661,11 @@ See `format-seconds' for the list of available format specifiers."
                org-clock-agg-duration-format
                (alist-get :total (cdr node)))
               'face 'org-clock-agg-duration-face))
-     "\n"))
+     "\n")
+    (when show-elems
+      (org-clock-agg-render-tree-node-elems node)))
   (mapc (lambda (child)
-          (org-clock-agg--render-tree-node child (1+ level)))
+          (org-clock-agg--render-tree-node child show-elems (1+ level)))
         (alist-get :children (cdr node))))
 
 (defun org-clock-agg--parse-files (files)
@@ -553,7 +677,7 @@ See `format-seconds' for the list of available format specifiers."
 
 (defun org-clock-agg-refresh ()
   (interactive)
-  (cl-destructuring-bind (&key from to files groupby sort sort-order)
+  (cl-destructuring-bind (&key from to files groupby sort sort-order show-elems)
       (cl--alist-to-plist org-clock-agg--params)
     (let* ((files (org-clock-agg--parse-files files))
            (elems (org-clock-agg--query from to files))
@@ -567,10 +691,11 @@ See `format-seconds' for the list of available format specifiers."
           (search-forward (format "* Results") nil 'noerror)
           (beginning-of-line)
           (delete-region (point) (point-max))
-          (mapc #'org-clock-agg--render-tree-node tree))))))
+          (dolist (node tree)
+            (org-clock-agg--render-tree-node node show-elems)))))))
 
-(defun org-clock-agg (from to files groupby sort sort-order)
-  (interactive (list -7 0 'org-agenda nil nil nil))
+(defun org-clock-agg (from to files groupby sort sort-order show-elems)
+  (interactive (list -7 0 'org-agenda nil nil nil nil))
   (let* ((buffer (generate-new-buffer "*org-clock-agg*")))
     (switch-to-buffer-other-window buffer)
     (with-current-buffer buffer
@@ -581,7 +706,8 @@ See `format-seconds' for the list of available format specifiers."
                     (:files . ,files)
                     (:groupby . ,groupby)
                     (:sort . ,sort)
-                    (:sort-order . ,sort-order)))
+                    (:sort-order . ,sort-order)
+                    (:show-elems . ,show-elems)))
       (let ((inhibit-read-only t))
         (org-clock-agg--render-controls)
         (org-clock-agg-refresh))
