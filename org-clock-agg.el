@@ -180,7 +180,7 @@ See `format-seconds' for the list of available format specifiers."
     (unless readable-name
       (setq readable-name (symbol-name name)))
     `(progn
-       (defun ,func-name (elems)
+       (defun ,func-name (nodes)
          ,@body)
        (push (cons ',name '((:function . ,func-name)
                             (:readable-name . ,readable-name)))
@@ -230,12 +230,12 @@ See `format-seconds' for the list of available format specifiers."
 (org-clock-agg-defsort name
   "Sort by name."
   :readable-name "Name"
-  (seq-sort-by (lambda (elem) (alist-get :name elem)) #'string-lessp elems))
+  (seq-sort-by (lambda (elem) (alist-get :name elem)) #'string-lessp nodes))
 
 (org-clock-agg-defsort total
   "Sort by total time spent."
   :readable-name "Total time"
-  (seq-sort-by (lambda (elem) (alist-get :total elem)) #'> elems))
+  (seq-sort-by (lambda (elem) (alist-get :total elem)) #'> nodes))
 
 (org-clock-agg-defsort start-time
   "Sort by start time."
@@ -247,7 +247,7 @@ See `format-seconds' for the list of available format specifiers."
                   (org-clock-agg--ungroup)
                   (mapcar (lambda (row-elem) (alist-get :start row-elem)))
                   (seq-min)))
-   #'> elem))
+   #'> nodes))
 
 (org-clock-agg-defsort end-time
   "Sort by end time."
@@ -259,7 +259,7 @@ See `format-seconds' for the list of available format specifiers."
                   (org-clock-agg--ungroup)
                   (mapcar (lambda (row-elem) (alist-get :end row-elem)))
                   (seq-max)))
-   #'> elem))
+   #'> nodes))
 
 (defun org-clock-agg--groupby-apply (alist groups elem)
   (let* ((group-params (car groups))
@@ -304,9 +304,9 @@ See `format-seconds' for the list of available format specifiers."
     res))
 
 (defun org-clock-agg--ungroup (tree)
-  (cl-loop for tree-elem in tree
-           append (alist-get :elems tree-elem)
-           append (org-clock-agg--ungroup (alist-get :children elem))))
+  (cl-loop for node in tree
+           append (alist-get :elems node)
+           append (org-clock-agg--ungroup (alist-get :children node))))
 
 (defun org-clock-agg--groupby-sort (tree)
   (let* ((sorted-nodes-by-group
@@ -519,7 +519,7 @@ See `format-seconds' for the list of available format specifiers."
         (concat (substring string 0 (- max-len 3)) "...")
       string)))
 
-(defun org-clock-agg--render-tree-elem (elem &optional level)
+(defun org-clock-agg--render-tree-node (node &optional level)
   (unless level
     (setq level 1))
   (let ((level-face (nth (mod (1- level) 8)  org-level-faces))
@@ -528,21 +528,21 @@ See `format-seconds' for the list of available format specifiers."
     (insert
      (format (format "%%-%ds %%20s %%8s" title-width)
              (propertize (org-clock-agg--trim-string
-                          (concat level-string " " (car elem))
+                          (concat level-string " " (car node))
                           title-width)
                          'face level-face)
              (propertize
-              (alist-get :readable-name (alist-get :groupby (cdr elem)))
+              (alist-get :readable-name (alist-get :groupby (cdr node)))
               'face 'org-clock-agg-group-face)
              (propertize
               (format-seconds
                org-clock-agg-duration-format
-               (alist-get :total (cdr elem)))
+               (alist-get :total (cdr node)))
               'face 'org-clock-agg-duration-face))
      "\n"))
   (mapc (lambda (child)
-          (org-clock-agg--render-tree-elem child (1+ level)))
-        (alist-get :children (cdr elem))))
+          (org-clock-agg--render-tree-node child (1+ level)))
+        (alist-get :children (cdr node))))
 
 (defun org-clock-agg--parse-files (files)
   (cond ((eq files 'org-agenda)
@@ -567,7 +567,7 @@ See `format-seconds' for the list of available format specifiers."
           (search-forward (format "* Results") nil 'noerror)
           (beginning-of-line)
           (delete-region (point) (point-max))
-          (mapc #'org-clock-agg--render-tree-elem tree))))))
+          (mapc #'org-clock-agg--render-tree-node tree))))))
 
 (defun org-clock-agg (from to files groupby sort sort-order)
   (interactive (list -7 0 'org-agenda nil nil nil))
