@@ -180,6 +180,19 @@ Return a list of alists with the following keys:
                       (:category . ,category)))))
 
 (defun org-clock-agg--normalize-time-predicate (val kind)
+  "Normalize VAL to a time predicate.
+
+VAL can be either:
+- a number, in which case it's interpreted as a number of days from
+  the current one
+- a string, parseable by `parse-time-string', with or without the time
+  part.
+
+KIND is either 'from or 'to.  If it's the latter, the time part is the
+to 23:59:59 when possible, otherwise it's 00:00:00.
+
+The result is a number of seconds since the epoch."
+
   (when-let (int-val
              (and (stringp val) (ignore-errors (number-to-string val))))
     (setq val int-val))
@@ -602,16 +615,16 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
 
 ;; View & manage results
 (defvar-local org-clock-agg--params nil
-  "Parameters for the current org-clock-agg buffer.")
+  "Parameters for the current `org-clock-agg' buffer.")
 
 (defvar-local org-clock-agg--elems nil
-  "Elements for the current org-clock-agg buffer.")
+  "Elements for the current `org-clock-agg' buffer.")
 
 (defvar-local org-clock-agg--tree nil
-  "Tree for the current org-clock-agg buffer.")
+  "Tree for the current `org-clock-agg' buffer.")
 
 (defun org-clock-agg-quit ()
-  "Quit the current org-clock-agg buffer."
+  "Quit the current `org-clock-agg' buffer."
   (interactive)
   (quit-window t))
 
@@ -628,7 +641,7 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
     keymap))
 
 (define-derived-mode org-clock-agg-tree-mode fundamental-mode "Org Clock Agg Tree"
-  "Major mode for viewing org-clock-agg results."
+  "Major mode for viewing `org-clock-agg' results."
   (outline-minor-mode 1))
 
 (defun org-clock-agg--render-controls-files ()
@@ -758,6 +771,11 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
                  :notify (lambda (&rest ignore)
                            (org-clock-agg-refresh))
                  "Refresh")
+  (insert " ")
+  (widget-create 'push-button
+                 :notify (lambda (&rest ignore)
+                           (org-clock-agg-generate-report))
+                 "Create function")
   (insert "\n\n")
   (widget-setup))
 
@@ -866,15 +884,25 @@ created by `org-clock-agg--render-controls-files'."
          (alist-get files org-clock-agg-files-preset nil nil #'equal))
         (t files)))
 
+(cl-defun org-clock-agg-exec (from to files groupby sort sort-order)
+  "Aggregate org-clock data and return the result as tree.
+
+See `org-clock-agg' for the meaning of FROM, TO, FILES, GROUPBY,
+SORT, and SORT-ORDER.  See `org-clock-agg--groupby' for the
+return value description."
+  (let* ((files (org-clock-agg--parse-files files))
+         (elems (org-clock-agg--query from to files))
+         (tree (org-clock-agg--groupby elems groupby sort sort-order))
+         (tree (org-clock-agg--groupby-sort tree)))
+    (cons elems tree)))
+
 (defun org-clock-agg-refresh ()
   "Refresh the `org-clock-agg' buffer."
   (interactive)
   (cl-destructuring-bind (&key from to files groupby sort sort-order show-elems)
       (org-clock-agg--alist-to-plist org-clock-agg--params)
-    (let* ((files (org-clock-agg--parse-files files))
-           (elems (org-clock-agg--query from to files))
-           (tree (org-clock-agg--groupby elems groupby sort sort-order))
-           (tree (org-clock-agg--groupby-sort tree)))
+    (pcase-let ((`(,elems . ,tree)
+                 (org-clock-agg-exec from to files groupby sort sort-order)))
       (setq-local org-clock-agg--elems elems)
       (setq-local org-clock-agg--tree tree)
       (save-excursion
@@ -886,12 +914,34 @@ created by `org-clock-agg--render-controls-files'."
           (dolist (node tree)
             (org-clock-agg--render-tree-node node show-elems)))))))
 
+(defun org-clock-agg-generate-report ()
+  "Generate a report function from the `org-clock-agg' state."
+  (interactive)
+  (unless (derived-mode-p 'org-clock-agg-tree-mode)
+    (user-error "Not in `org-clock-agg-tree-mode'"))
+  (let ((buffer (generate-new-buffer "*org-clock-agg-gen*")))
+    (cl-destructuring-bind (&key from to files groupby sort sort-order show-elems)
+        (org-clock-agg--alist-to-plist org-clock-agg--params)
+      (with-current-buffer buffer
+        (emacs-lisp-mode)
+        (insert
+         ";; Change the function name if necessary\n"
+         (pp-to-string
+          `(defun org-clock-agg-custom-report ()
+             (interactive)
+             (apply #'org-clock-agg
+                    '(,from ,to ,files ,groupby ,sort ,sort-order ,show-elems)))))))
+    (switch-to-buffer buffer)))
+
 (defun org-clock-agg (from to files groupby sort sort-order show-elems)
   "Aggregate org-clock data.
 
 The function creates an interactive buffer to configure the
 aggregation and display the results.  If functions is called
 non-interactively, intials parameters can be passed as arguments.
+
+Use `org-clock-agg-exec' if you want to retrive the results
+without the interactive buffer.
 
 FROM and TO define the time range.  Both are `org-ql' time predicates,
 that is a number of days (e.g. -7 for the last week) or a date
