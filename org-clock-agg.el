@@ -1,11 +1,11 @@
-;;; org-clock-agg.el --- Aggregate org-clock statistics  -*- lexical-binding: t -*-
+;;; org-clock-agg.el --- Tree-like reports for org-clock records -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2023 Korytov Pavel
 
 ;; Author: Korytov Pavel <thexcloud@gmail.com>
 ;; Maintainer: Korytov Pavel <thexcloud@gmail.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "27.1") (compat "29.1.4.1") (org-ql "0.8-pre"))
+;; Package-Requires: ((emacs "27.2") (compat "29.1.4.1") (org-ql "0.8-pre"))
 ;; Homepage: https://github.com/SqrtMinusOne/org-clock-agg
 
 ;; This file is NOT part of GNU Emacs.
@@ -25,7 +25,18 @@
 
 ;;; Commentary:
 
-;; TODO
+;; Aggregate org-clock records and show the results in an interactive
+;; buffer.  The records are grouped by predicates such as file name,
+;; their outline path in the file, etc.  Each record is placed in a
+;; tree strcture; each node of the tree shows the total time spent in
+;; that node and its children.  The top-level node shows the total
+;; time spent in all records found by the query.
+;;
+;; `org-clock-agg' is the main entrypoint.  It can be run interactively
+;; or from elisp code.  See the docstring for details.
+;;
+;; See also the REAME at
+;; <https://github.com/SqrtMinusOne/org-clock-agg> for more details.
 
 ;;; Code:
 (require 'cl-lib)
@@ -73,6 +84,11 @@ See `format-time-string' for the list of available format specifiers."
 
 See `format-time-string' for the list of available format specifiers."
   :type 'string
+  :group 'org-clock-agg)
+
+(defcustom org-clock-agg-properties nil
+  "Org properties to include in `org-clock-agg' views."
+  :type '(repeat string)
   :group 'org-clock-agg)
 
 (defface org-clock-agg-group-face
@@ -144,6 +160,29 @@ Return a list of alists with the following keys:
           nil nil 'headline)
         res))))
 
+(defun org-clock-agg--properties-at-point ()
+  "Return a list of selected properties at point.
+
+`org-clock-agg-properties' sets the list of properties to select.  The
+properties are inherited from the parent headlines and from the global
+properties set in the beginning of the file."
+  (let ((global-props
+         (org-ql--value-at
+          1 (lambda ()
+              (cl-loop for res in (org-collect-keywords org-clock-agg-properties)
+                       collect (cons (nth 0 res) (nth 1 res))))))
+        (local-props
+         (org-ql--value-at
+          (point)
+          (lambda ()
+            (cl-loop for key in org-clock-agg-properties
+                     for val = (org-entry-get nil key t)
+                     when val collect `(,key . ,val))))))
+    (seq-uniq
+     (append local-props global-props)
+     (lambda (a b)
+       (equal (car a) (car b))))))
+
 (defun org-clock-agg--parse-headline ()
   "Parse headline at point.
 
@@ -156,6 +195,8 @@ Return a list of alists with the following keys:
 - `:file' - file name
 - `:outline-path' - list of outline path, i.e. all headlines from the
   root to the current headline
+- `:properties' - list of properties, `org-clock-agg-properties' sets the
+  list of properties to select
 - `:category' - category of the current headline."
   (let* ((headline (org-element-headline-parser))
          (tags-val (org-ql--tags-at (point)))
@@ -169,6 +210,8 @@ Return a list of alists with the following keys:
          (outline-path (mapcar
                         #'substring-no-properties
                         (org-ql--outline-path)))
+         (properties (when org-clock-agg-properties
+                       (org-clock-agg--properties-at-point)))
          (category (org-get-category)))
     (org-ql--add-markers headline)
     (cl-loop for clock in (org-clock-agg--parse-clocks headline)
@@ -177,6 +220,7 @@ Return a list of alists with the following keys:
                       (:tags . ,tags)
                       (:file . ,file)
                       (:outline-path . ,outline-path)
+                      (:properties . ,properties)
                       (:category . ,category)))))
 
 (defun org-clock-agg--normalize-time-predicate (val kind)
@@ -435,6 +479,23 @@ BODY can also contain the following keyword arguments:
                      (alist-get :start)
                      (seconds-to-time)
                      (format-time-string "%u - %A"))))
+
+(defun org-clock-agg--make-property-name-readable (name)
+  "Make an org property NAME more readable."
+  (thread-last
+    name
+    (replace-regexp-in-string (rx (or "_" "-")) " ")
+    (capitalize)))
+
+(org-clock-agg-defgroupby selected-properties
+  :readable-name "Selected props"
+  :default-sort total
+  (cl-loop for (key . value) in (alist-get :properties elem)
+           if value
+           collect (format
+                    "%s: %s"
+                    (org-clock-agg--make-property-name-readable key)
+                    value)))
 
 (org-clock-agg-defgroupby root-group
   "Return \"Root\".  Used for the root group."
