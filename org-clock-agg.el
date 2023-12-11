@@ -94,7 +94,8 @@ manually after setting."
   :type '(repeat string)
   :group 'org-clock-agg
   :set (lambda (&rest _)
-         (setq org-ql-cache (make-hash-table :weakness 'key))))
+         (setq org-ql-cache (make-hash-table :weakness 'key))
+         (setq org-ql-node-value-cache (make-hash-table :weakness 'key))))
 
 (defconst org-clock-agg--extra-params-default
   '(("Show elements:" . (checkbox :extras-key :show-elems))
@@ -1047,18 +1048,18 @@ return value description."
   (unless (derived-mode-p 'org-clock-agg-tree-mode)
     (user-error "Not in `org-clock-agg-tree-mode'"))
   (let ((buffer (generate-new-buffer "*org-clock-agg-gen*")))
-    (cl-destructuring-bind (&key from to files groupby sort sort-order show-elems)
+    (cl-destructuring-bind (&key from to files groupby sort sort-order extra-params)
         (org-clock-agg--alist-to-plist org-clock-agg--params)
       (with-current-buffer buffer
         (emacs-lisp-mode)
         (insert
          ";; Change the function name if necessary\n"
-(pp-to-string
- `(defun org-clock-agg-custom-report ()
-    (interactive)
-    (apply #'org-clock-agg
-           '(,from ,to ,files ,groupby ,sort ,sort-order ,show-elems)))))))
-(switch-to-buffer buffer)))
+         (pp-to-string
+          `(defun org-clock-agg-custom-report ()
+             (interactive)
+             (apply #'org-clock-agg
+                    '(,from ,to ,files ,groupby ,sort ,sort-order ,extra-params)))))))
+    (switch-to-buffer buffer)))
 
 (defun org-clock-agg (from to files groupby sort sort-order extra-params)
   "Aggregate org-clock data.
