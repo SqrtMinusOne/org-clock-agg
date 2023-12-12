@@ -125,8 +125,8 @@ manually after setting."
 (defface org-clock-agg-elem-face nil
   "Face for elements in `org-clock-agg' tree views.
 
-  It's probably supposed to be nil because it overrides the default
-  element formatting."
+It's probably supposed to be nil because it overrides the default
+element formatting."
   :group 'org-clock-agg)
 
 ;; XXX org-ql caches results of queries, so make sure to run this
@@ -147,10 +147,10 @@ manually after setting."
 (defun org-clock-agg--parse-clocks (headline)
   "Extract org-clock clocks from HEADLINE.
 
-  Return a list of alists with the following keys:
-  - `:start' - start time in seconds since the epoch
-  - `:end' - end time in seconds since the epoch
-  - `:duration' - duration in seconds."
+Return a list of alists with the following keys:
+- `:start' - start time in seconds since the epoch
+- `:end' - end time in seconds since the epoch
+- `:duration' - duration in seconds."
   (let ((contents (buffer-substring-no-properties
                    ;; contents-begin starts after the headline
                    (org-element-property :contents-begin headline)
@@ -179,9 +179,9 @@ manually after setting."
 (defun org-clock-agg--properties-at-point ()
   "Return a list of selected properties at point.
 
-  `org-clock-agg-properties' sets the list of properties to select.  The
-  properties are inherited from the parent headlines and from the global
-  properties set in the beginning of the file."
+`org-clock-agg-properties' sets the list of properties to select.  The
+properties are inherited from the parent headlines and from the global
+properties set in the beginning of the file."
   (let ((global-props
          (org-ql--value-at
           1 (lambda ()
@@ -202,18 +202,18 @@ manually after setting."
 (defun org-clock-agg--parse-headline ()
   "Parse headline at point.
 
-  Return a list of alists with the following keys:
-  - `:start' - start time in seconds since the epoch
-  - `:end' - end time in seconds since the epoch
-  - `:duration' - duration in seconds
-  - `:headline' - instance of org-element for the headline
-  - `:tags' - list of tags
-  - `:file' - file name
-  - `:outline-path' - list of outline path, i.e. all headlines from the
-  root to the current headline
-  - `:properties' - list of properties, `org-clock-agg-properties' sets the
-  list of properties to select
-  - `:category' - category of the current headline."
+Return a list of alists with the following keys:
+- `:start' - start time in seconds since the epoch
+- `:end' - end time in seconds since the epoch
+- `:duration' - duration in seconds
+- `:headline' - instance of org-element for the headline
+- `:tags' - list of tags
+- `:file' - file name
+- `:outline-path' - list of outline path, i.e. all headlines from the
+root to the current headline
+- `:properties' - list of properties, `org-clock-agg-properties' sets the
+list of properties to select
+- `:category' - category of the current headline."
   (let* ((headline (org-element-headline-parser))
          (tags-val (org-ql--tags-at (point)))
          (tags (seq-filter
@@ -242,16 +242,16 @@ manually after setting."
 (defun org-clock-agg--normalize-time-predicate (val kind)
   "Normalize VAL to a time predicate.
 
-  VAL can be either:
-  - a number, in which case it's interpreted as a number of days from
-  the current one
-  - a string, parseable by `parse-time-string', with or without the time
-  part.
+VAL can be either:
+- a number, in which case it's interpreted as a number of days from
+the current one
+- a string, parseable by `parse-time-string', with or without the time
+part.
 
-  KIND is either 'from or 'to.  If it's the latter, the time part is the
-  to 23:59:59 when possible, otherwise it's 00:00:00.
+KIND is either \"from\" or \"to\".  If it's the latter, the time part is the
+to 23:59:59 when possible, otherwise it's 00:00:00.
 
-  The result is a number of seconds since the epoch."
+The result is a number of seconds since the epoch."
 
   (when-let (int-val
              (and (stringp val) (ignore-errors (number-to-string val))))
@@ -282,10 +282,10 @@ manually after setting."
 (defun org-clock-agg--filter-elems (from to elems)
   "Filter ELEMS by FROM and TO.
 
-  FROM and TO should either be a number (e.g. -7 is the last week) or a
-  string parseable by `parse-time-string'.
+FROM and TO should either be a number (e.g. -7 is the last week) or a
+string parseable by `parse-time-string'.
 
-  ELEMS is a list as descbribed in `org-clock-agg--parse-headline'."
+ELEMS is a list as descbribed in `org-clock-agg--parse-headline'."
 
   (let ((from-date (org-clock-agg--normalize-time-predicate from 'from))
         (to-date (org-clock-agg--normalize-time-predicate to 'to)))
@@ -312,42 +312,42 @@ manually after setting."
 (defvar org-clock-agg-groupby-functions nil
   "Group by functions for `org-clock-agg'.
 
-  This is an alist with function names as keys and alists with the
-  following keys as values:
-  - `:function' - grouping function itself
-  - `:hidden' - whether to hide the function in the UI
-  - `:readable-name' - name to display in the UI
-  - `:default-sort' - default sorting function to use for this group.
+This is an alist with function names as keys and alists with the
+following keys as values:
+- `:function' - grouping function itself
+- `:hidden' - whether to hide the function in the UI
+- `:readable-name' - name to display in the UI
+- `:default-sort' - default sorting function to use for this group.
 
-  See `org-clock-agg-defgroupby' on how to define new grouping
-  functions.")
+See `org-clock-agg-defgroupby' on how to define new grouping
+functions.")
 
 (defvar org-clock-agg-sort-functions nil
   "Sort functions for `org-clock-agg'.
 
-  This is an alist with function names as keys and alists with the
-  following keys as values:
-  - `:function' - sorting function itself
-  - `:readable-name' - name to display in the UI.
+This is an alist with function names as keys and alists with the
+following keys as values:
+- `:function' - sorting function itself
+- `:readable-name' - name to display in the UI.
 
-  See `org-clock-agg-defsort' on how to define new sorting
-  functions.")
+See `org-clock-agg-defsort' on how to define new sorting
+functions.")
 
 ;; XXX This looks like reinventing the wheel... IDK.
 (defmacro org-clock-agg--extract-params (body &rest params)
   "Extract parameters from BODY.
 
-  BODY is a list of expressions.  PARAMS is a list of symbols starting
-  with \":\".
+BODY is a list of expressions.  PARAMS is a list of symbols starting
+with \":\".
 
-  E.g. if BODY is (:foo 1 :bar 2 something something), the usage is as follows:
+E.g. if BODY is (:foo 1 :bar 2 something something), the usage is as follows:
 
-  \(let \(foo bar)
+\(let \(foo bar)
 \(org-clock-agg--extract-params body :foo :bar)
 ;; do something with foo and bar
 )"
-  `(let ((body-wo-docstring (if (stringp (car-safe body)) (cdr body) body))
-         (docstring (when (stringp (car-safe body)) (car-safe body))))
+  `(let ((body-wo-docstring (if (stringp (car-safe ,body)) (cdr body) ,body))
+         (docstring (when (stringp (car-safe ,body)) (car-safe ,body))))
      (while-let ((symbol (and
                           (member (car-safe body-wo-docstring) ',params)
                           (car-safe body-wo-docstring))))
@@ -358,8 +358,8 @@ manually after setting."
           params)
        (setq body-wo-docstring (cddr body-wo-docstring)))
      (if docstring
-         (setq body (cons docstring body-wo-docstring))
-       (setq body body-wo-docstring))))
+         (setq ,body (cons docstring body-wo-docstring))
+       (setq ,body body-wo-docstring))))
 
 (cl-defmacro org-clock-agg-defgroupby (name &body body)
   "Define a grouping function for `org-clock-agg'.
@@ -388,6 +388,8 @@ sort function."
       (setq readable-name (symbol-name name)))
     `(progn
        (defun ,func-name (elem extra-params)
+         ;; XXX To silence the byte-compiler
+         (ignore elem extra-params)
          ,@body)
        (setf (alist-get ',name org-clock-agg-groupby-functions)
              '((:function . ,func-name)
@@ -696,7 +698,7 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
                      (alist-get :sort-order node))))
             (mapcar
              (lambda (grouped)
-               (let ((group-symbol (nth 0 (car grouped)))
+               (let (;; (group-symbol (nth 0 (car grouped)))
                      (sort-symbol (nth 1 (car grouped)))
                      (sort-order (nth 2 (car grouped))))
                  (setf (cdr grouped)
@@ -769,7 +771,7 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
    #'widget-create 'menu-choice
    :tag "Files"
    :value (alist-get :files org-clock-agg--params)
-   :notify (lambda (widget &rest ignore)
+   :notify (lambda (widget &rest _)
              (setf (alist-get :files org-clock-agg--params)
                    (widget-value widget)))
    '(item :tag "Org Agenda" :value org-agenda)
@@ -793,7 +795,7 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
                           (if (numberp val)
                               (number-to-string val)
                             val))
-                 :notify (lambda (widget &rest ignore)
+                 :notify (lambda (widget &rest _)
                            (let ((val (widget-value widget)))
                              (when (string-match-p (rx bos (? "-") (+ digit) eos) val)
                                (setq val (string-to-number val)))
@@ -806,7 +808,7 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
                           (if (numberp val)
                               (number-to-string val)
                             val))
-                 :notify (lambda (widget &rest ignore)
+                 :notify (lambda (widget &rest _)
                            (let ((val (widget-value widget)))
                              (when (string-match-p (rx bos (? "-") (+ digit) eos) val)
                                (setq val (string-to-number val)))
@@ -823,7 +825,7 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
                                  for sort-order-value in (alist-get :sort-order org-clock-agg--params)
                                  collect (list group-value sort-value sort-order-value))
                  :notify
-                 (lambda (widget changed-widget &optional event)
+                 (lambda (widget _changed-widget &optional _event)
                    (let ((group-value (mapcar #'car (widget-value widget)))
                          (sort-value (mapcar #'cadr (widget-value widget)))
                          (sort-order-value (mapcar #'caddr (widget-value widget))))
@@ -894,12 +896,12 @@ WIDGET is the instance of the widget that was changed."
   (org-clock-agg--render-extra-params)
   (insert "\n")
   (widget-create 'push-button
-                 :notify (lambda (&rest ignore)
+                 :notify (lambda (&rest _)
                            (org-clock-agg-refresh))
                  "Refresh")
   (insert " ")
   (widget-create 'push-button
-                 :notify (lambda (&rest ignore)
+                 :notify (lambda (&rest _)
                            (org-clock-agg-generate-report))
                  "Create function")
   (insert "\n\n")
@@ -960,7 +962,7 @@ NODE is one node of a tree, which is described in the function
                (org-element-property :raw-value (alist-get :headline elem))))))
         (widget-create 'push-button
                        :elem elem
-                       :notify (lambda (widget &rest ignore)
+                       :notify (lambda (widget &rest _)
                                  (let ((elem (widget-get widget :elem)))
                                    (org-clock-agg--goto-elem elem)))
                        :button-face 'org-clock-agg-elem-face
@@ -1075,7 +1077,7 @@ FROM and TO define the time range.  Both are `org-ql' time predicates,
 that is a number of days (e.g. -7 for the last week) or a date
 parseable by `parse-time-string'.
 
-FILES is either 'org-agenda, a key of `org-clock-agg-files-preset' (in
+FILES is either `org-agenda', a key of `org-clock-agg-files-preset' (in
 which case the value of that variable is used) or a list of files.
 
 GROUPBY is a list of keys of `org-clock-agg-groupby-functions'.  Each
