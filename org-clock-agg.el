@@ -35,7 +35,7 @@
 ;; `org-clock-agg' is the main entrypoint.  It can be run interactively
 ;; or from elisp code.  See the docstring for details.
 ;;
-;; See also the REAME at
+;; See also the README at
 ;; <https://github.com/SqrtMinusOne/org-clock-agg> for more details.
 
 ;;; Code:
@@ -97,6 +97,54 @@ manually after setting."
          (setq org-ql-cache (make-hash-table :weakness 'key))
          (setq org-ql-node-value-cache (make-hash-table :weakness 'key))))
 
+(defcustom org-clock-agg-node-title-width-delta 40
+  "How many characters to take away from the node title.
+
+See `org-clock-agg-node-format' on how to set this."
+  :type 'integer
+  :group 'org-clock-agg)
+
+(defcustom org-clock-agg-node-format "%-%(+ title-width)t %20c %8z"
+  "Format string for node title in `org-clock-agg' views.
+
+The following format specifiers are available:
+- %t - node title with the level prefix, truncated to
+   `title-width' characters (see below)
+- %c - the name of the grouping function that produced the node
+   (the `:readable-name' parameter)
+- %z - time spent in node according to
+   `org-clock-agg-duration-format'.
+- %s - time share of the node against the parent node
+- %S - time share of the node against the top-level node
+
+See `format-spec' for the avaliable modifers.
+
+This format string also evaluates elisp expressions in the
+%(...) blocks.  During evaluation, the following variables are
+bound:
+- `title-width' - `window-width' minus
+  `org-clock-agg-node-title-width-delta'
+
+That way, in the default configuration, the node title is truncated to
+make the resulting string fit into the window.
+I.e. `org-clock-agg-node-title-width-delta' means how many characters
+to allocate for the rest of the string, without the node title."
+  :type 'string
+  :group 'org-clock-agg)
+
+(defcustom org-clock-agg-elem-format "- [%s]--[%e] => %d : %t"
+  "Format string for elements in `org-clock-agg' views.
+
+The following format specifiers are available:
+- %s - start of the time range
+- %e - end of the time range
+- %d - duration of the time range
+- %t - title of the record.
+
+Formats of %s and %e are controlled by `org-time-stamp-formats'."
+  :type 'string
+  :group 'org-clock-agg)
+
 (defconst org-clock-agg--extra-params-default
   '(("Show elements:" . (checkbox :extras-key :show-elems))
     ("Add \"Ungrouped\"" . (checkbox :extras-key :add-ungrouped)))
@@ -110,6 +158,11 @@ manually after setting."
 (defface org-clock-agg-group-face
   '((t :inherit font-lock-comment-face))
   "Face for group names in `org-clock-agg' tree views."
+  :group 'org-clock-agg)
+
+(defface org-clock-agg-share-face
+  '((t :inherit font-lock-comment-face))
+  "Face for node time share values in `org-clock-agg' tree views."
   :group 'org-clock-agg)
 
 (defface org-clock-agg-duration-face
@@ -588,6 +641,8 @@ return value."
                              (alist-get :children prev-val) rest elem))
               (:sort-symbol . ,sort)
               (:sort-order . ,sort-order)
+              (:parent-share . ,0)
+              (:total-share . ,0)
               (:elems . ,(if rest
                              (alist-get :elems prev-val)
                            (cons elem (alist-get :elems prev-val))))))))
@@ -622,10 +677,34 @@ TREE is a tree as returned by `org-clock-agg--groupby'."
                    (:children)
                    (:sort-symbol . total)
                    (:sort-order)
+                   (:parent-share . 0)
+                   (:total-share . 0)
                    (:elems . ,elems))
                  (alist-get :children (cdr node)))))
         (setf (alist-get :elems (cdr node)) nil))))
   tree)
+
+(defun org-clock-agg--groupby-postaggregate (tree &optional total-time parent-time)
+  "Perform final aggregation calculations on TREE.
+
+This function sets the following fields on each tree node:
+- `:parent-share'
+- `:total-share'
+
+TOTAL-TIME and PARENT-TIME are recursive parameters."
+  (unless (and total-time parent-time)
+    (setq total-time (alist-get :total (cdar tree)))
+    (setq parent-time total-time))
+  (dolist (node tree)
+    (let ((total (float (alist-get :total (cdr node)))))
+      (setf (alist-get :parent-share (cdr node))
+            (/ total (float parent-time))
+            (alist-get :total-share (cdr node))
+            (/ total (float total-time)))
+      (org-clock-agg--groupby-postaggregate
+       (alist-get :children (cdr node))
+       total-time
+       total))))
 
 (defun org-clock-agg--groupby (elems groupby-list sort-list sort-order-list extra-params)
   "Group ELEMS for `org-clock-agg' into a tree.
@@ -645,6 +724,8 @@ the tree.  See `org-clock-agg' for more.
 
 The return value is a tree of alists with the following keys:
 - `:total' - total seconds spent in group
+- `:parent-share' - `:total' / time spent in parent node
+- `:total-share' - `:total' / time spent in the top-level node
 - `:groupby' - grouping function (as in the variable
                                      `org-clock-agg-groupby-functions')
 - `:children' - list of children tree nodes
@@ -671,6 +752,7 @@ sorting
         (setq tree (org-clock-agg--groupby-apply tree groups elem))))
     (when (alist-get :add-ungrouped extra-params)
       (setq tree (org-clock-agg--add-ungrouped tree)))
+    (org-clock-agg--groupby-postaggregate tree)
     tree))
 
 (defun org-clock-agg--ungroup (tree)
@@ -924,6 +1006,21 @@ ELEM is an alist as described in `org-clock-agg--parse-headline'."
   (let ((marker (org-element-property :org-marker (alist-get :headline elem))))
     (org-goto-marker-or-bmk marker)))
 
+(defun org-clock-agg--process-format-spec (spec &optional lexical)
+  "Expand the %(...) in SPEC string.
+
+Each %(...) is evaluated as an elisp expression and the result
+is inserted in the string.
+
+LEXICAL is the lexical environment in which the expressions are
+evaluated."
+  (save-match-data
+    (while (string-match "%\\(([^)]+)\\)" spec)
+      (setq spec (replace-match
+                  (format "%s" (eval (read (match-string 1 spec)) lexical))
+                  t t spec)))
+    spec))
+
 (defun org-clock-agg-render-tree-node-elems (node)
   "Render elements for the tree NODE.
 
@@ -933,33 +1030,39 @@ NODE is one node of a tree, which is described in the function
              (widget-push-button-prefix "")
              (widget-push-button-suffix ""))
     (dolist (elem elems)
-      (let ((elem-name
-             (format
-              "- [%s]--[%s] => %s : %s"
-              (propertize
-               (thread-last elem
-                            (alist-get :start)
-                            (seconds-to-time)
-                            (format-time-string (cdr org-time-stamp-formats)))
-               'face 'org-date)
-              (propertize
-               (thread-last elem
-                            (alist-get :end)
-                            (seconds-to-time)
-                            (format-time-string (cdr org-time-stamp-formats)))
-               'face 'org-date)
-              (org-duration-from-minutes
-               (/ (alist-get :duration elem) 60))
-              (concat
-               (when-let ((todo-keyword (substring-no-properties
-                                         (org-element-property
-                                          :todo-keyword
-                                          (alist-get :headline elem)))))
-                 (propertize
-                  (concat todo-keyword " ") 'face
-                  (if (eq (org-element-property :todo-type (alist-get :headline elem)) 'done)
-                      'org-done 'org-todo)))
-               (org-element-property :raw-value (alist-get :headline elem))))))
+      (let* ((spec
+              `((?s .
+                    ,(propertize
+                      (thread-last elem
+                                   (alist-get :start)
+                                   (seconds-to-time)
+                                   (format-time-string (cdr org-time-stamp-formats)))
+                      'face 'org-date))
+                (?e . ,(propertize
+                        (thread-last elem
+                                     (alist-get :end)
+                                     (seconds-to-time)
+                                     (format-time-string (cdr org-time-stamp-formats)))
+                        'face 'org-date))
+                (?d . ,(org-duration-from-minutes
+                        (/ (alist-get :duration elem) 60)))
+                (?t . ,(concat
+                        (when-let ((todo-keyword (substring-no-properties
+                                                  (org-element-property
+                                                   :todo-keyword
+                                                   (alist-get :headline elem)))))
+                          (propertize
+                           (concat todo-keyword " ") 'face
+                           (if (eq (org-element-property
+                                    :todo-type (alist-get :headline elem))
+                                   'done)
+                               'org-done 'org-todo)))
+                        (org-element-property :raw-value
+                                              (alist-get :headline elem))))))
+             (elem-name
+              (format-spec
+               (org-clock-agg--process-format-spec org-clock-agg-elem-format)
+               spec)))
         (widget-create 'push-button
                        :elem elem
                        :notify (lambda (widget &rest _)
@@ -977,24 +1080,41 @@ NODE is one node of a tree, which is described in the function
 elements as well.  LEVEL is the level of the node."
   (unless level
     (setq level 1))
-  (let ((level-face (nth (mod (1- level) 8)  org-level-faces))
-        (level-string (make-string level ?*))
-        (title-width (- (window-width) 40)))
-    (insert
-     (format (format "%%-%ds %%20s %%8s" title-width)
-             (propertize (org-clock-agg--trim-string
-                          (concat level-string " " (car node))
-                          title-width)
-                         'face level-face)
-             (propertize
-              (alist-get :readable-name (alist-get :groupby (cdr node)))
-              'face 'org-clock-agg-group-face)
-             (propertize
-              (format-seconds
-               org-clock-agg-duration-format
-               (alist-get :total (cdr node)))
-              'face 'org-clock-agg-duration-face))
-     "\n")
+  (let* ((level-face (nth (mod (1- level) 8)  org-level-faces))
+         (level-string (make-string level ?*))
+         (title-width (- (window-width) org-clock-agg-node-title-width-delta))
+         (spec `((?t . ,(propertize (org-clock-agg--trim-string
+                                     (concat level-string " " (car node))
+                                     title-width)
+                                    'face level-face))
+                 (?c . ,(propertize
+                         (alist-get :readable-name (alist-get :groupby (cdr node)))
+                         'face 'org-clock-agg-group-face))
+                 (?s . ,(propertize
+                         (thread-last (cdr node)
+                                      (alist-get :total-share)
+                                      (* 100)
+                                      (truncate)
+                                      (number-to-string))
+                         'face 'org-clock-agg-share-face))
+                 (?S . ,(propertize
+                         (thread-last (cdr node)
+                                      (alist-get :parent-share)
+                                      (* 100)
+                                      (truncate)
+                                      (number-to-string))
+                         'face 'org-clock-agg-share-face))
+                 (?z . ,(propertize
+                         (format-seconds
+                          org-clock-agg-duration-format
+                          (alist-get :total (cdr node)))
+                         'face 'org-clock-agg-duration-face)))))
+    (insert (format-spec
+             (org-clock-agg--process-format-spec
+              org-clock-agg-node-format
+              `((title-width . ,title-width)))
+             spec)
+            "\n")
     (when show-elems
       (org-clock-agg-render-tree-node-elems node)))
   (mapc (lambda (child)
