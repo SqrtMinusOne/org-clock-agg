@@ -1,0 +1,230 @@
+#+TITLE: org-clock-agg
+
+Aggregate [[https://orgmode.org/manual/Clocking-Work-Time.html][org-clock]] records and display the results in an interactive buffer. =org-clock= records are grouped by predicates such as file name, their outline path in the file, etc. Each record is placed in a tree structure; each node of the tree shows the total time spent in that node and its children. The top-level node shows the total time spent in all records found by the query.
+
+SCREENSHOT
+
+* Installation
+The package isn't yet available anywhere but in this repository. My preferred way for such cases is [[https://github.com/jwiegley/use-package][use-package]] and [[https://github.com/radian-software/straight.el][straight.el]]:
+
+#+begin_src emacs-lisp
+(use-package org-clock-agg
+  :straight (:host github :repo "SqrtMinusOne/org-clock-agg"))
+#+end_src
+
+Alternatively, clone the repository, add it to the =load-path=, and =require= the package.
+
+* Usage
+Run =M-x org-clock-agg= to open the interactive buffer (as depicted in the screenshot above).
+
+The interactive buffer provides the following controls:
+- *Files*: Specifies the org files from which to select (defaults to [[https://orgmode.org/manual/Agenda-Files.html][org-agenda]]).
+- *Date from* and *To*: Define the date range.
+- *Group by*: Determines how =org-clock= records are grouped.
+- *Show elements*: Whether to display raw =org-clock= records in each node.
+- *Add "Ungrouped"*: Option to include the "Ungrouped" node. This is particularly useful with [[*Custom grouping predicates][custom grouping predicates]].
+
+Press =[Refresh]= to update the buffer. The initial search might take some time, but subsequent searches are generally faster due to the caching mechanism employed by [[https://github.com/alphapapa/org-ql][org-ql]].
+
+The buffer uses [[https://www.gnu.org/software/emacs/manual/html_node/emacs/Outline-Mode.html][outline-mode]] to display the tree, so each node becomes an =outline-mode= header. Refer to the linked manual for available commands/keybindings, or, if you use =evil-mode=, check [[https://github.com/emacs-evil/evil-collection/blob/master/modes/outline/evil-collection-outline.el][the relevant evil-collection file]].
+
+** Files
+By default, the package selects =org-clock= records from =(org-agenda-files)=. Additional options can be included by customizing the =org-clock-agg-files-preset= variable. For instance:
+
+#+begin_src emacs-lisp
+(setq org-clock-agg-files-preset
+      `(("Org Agenda + Archive"
+         .
+         ,(append (org-agenda-files)
+                  (cl-remove-if
+                   (lambda (f) (string-match-p (rx "." eos) f))
+                   (directory-files (concat org-directory "/archive/") t))))))
+#+end_src
+
+Note that after updating any of these variables, you'll need to reopen the =*org-clock-agg*= buffer to view the changes.
+
+Alternatively, you can directly specify the list of files within the buffer by selecting "Custom list" in the "Files" control.
+
+** Date Range
+Dates can take the following values:
+
+- A number: Represents a relative number of days from the current date. E.g. the default value of =-7= to =0= menas the previous week up to today.
+- A date string in the format =YYYY-MM-DD HH:mm:ss=, with or without the time part.
+
+By default, the interval is inclusive. For instance, specifying an interval like 2023-12-12 .. 2023-12-13 includes all records from 2023-12-12 00:00:00 to 2023-12-13 23:59:59.
+
+** Group By
+Records are grouped based on the sequence of grouping predicates.
+
+For example, with the following content in =tasks.org=:
+#+begin_example
+,* Tasks
+,** DONE Thing 1
+:LOGBOOK:
+CLOCK: [2023-12-13 Wed 19:01]--[2023-12-13 Wed 19:29] =>  0:28
+CLOCK: [2023-12-13 Wed 19:30]--[2023-12-13 Wed 19:40] =>  0:10
+:END:
+#+end_example
+
+And predicates "Org file", "Day", and "Outline path", the records for "Thing 1" will be processed as follows:
+- "Day" -> =2023-12-13=
+- "Org file" -> =tasks.org=
+- "Outline path" -> =Tasks=, =Thing 1=
+Consequently, the node will be placed at the path =2023-12-13= / =tasks.org= / =Tasks= / =Thing 1= in the resulting tree:
+
+#+begin_example
+,* Results                                                  Root    0:38
+,** 2023-12-13                                               Day    0:38
+,*** tasks.org                                          Org File    0:38
+,**** Tasks                                         Outline path    0:38
+,***** Thing 1                                      Outline path    0:38
+- [2023-12-13 Wed 19:01]--[2023-12-13 Wed 19:29] =>  0:28 : DONE Thing 1
+- [2023-12-13 Wed 19:30]--[2023-12-13 Wed 19:40] =>  0:10 : DONE Thing 1
+#+end_example
+
+The following built-in predicates are currently available:
+
+| Name           | Comment                       | Customization variables      |
+|----------------+-------------------------------+------------------------------|
+| Category       |                               |                              |
+| Org file       |                               |                              |
+| Outline path   |                               |                              |
+| Tags           | Sorted alphabetically         |                              |
+| Headline       | Last item of the outline path |                              |
+| Day            |                               | =org-clock-agg-day-format=   |
+| Week           |                               | =org-clock-agg-week-format=  |
+| Month          |                               | =org-clock-agg-month-format= |
+| TODO keyword   |                               |                              |
+| Is done        |                               |                              |
+| Selected props |                               | =org-clock-agg-properties=   |
+
+Ensure to use =setopt= to set the variables; otherwise, the customization logic will not be invoked:
+
+#+begin_src emacs-lisp
+(setopt org-clock-agg-properties '("PROJECT_NAME"))
+#+end_src
+
+Refer also to [[*Custom grouping predicates][custom grouping predicates]].
+
+* Customization
+** Node Formatting
+The =org-clock-agg-node-format= variable determines the formatting of individual tree nodes. This uses a [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Custom-Format-Strings.html][format string]] that with the following format specifiers avaiable:
+- =%t=: Node title with the level prefix, truncated to =title-width= characters (refer to below)
+- =%c=: Name of the grouping function that generated the node
+- =%z=: Time spent in the node, formatted according to =org-clock-agg-duration-format=.
+- =%s=: Time share of the node against the parent node
+- =%S=: Time share of the node against the top-level node
+
+The default value is:
+#+begin_example
+%-%(+ title-width)t %20c %8z
+#+end_example
+
+Where =%(+ title-width)= is =(- (window-width) org-clock-agg-node-title-width-delta)=, with the default value of the latter set to =40=.
+
+Thefore, in the default configuration, the node title is truncated to =title-width= characters, while 40 symbols are allocated for the rest of the header, i.e. " %20c %8z" (30 symbols), along with additional space for folding symbols of =outline-minor-mode=, line numbers, etc.
+
+** Record Formatting
+When the "Show records" flag is enabled, associated records for each node are displayed. The formatting of these is defined by =org-clock-agg-elem-format=, which is also a format string with the following specifiers:
+Customize the formatting of these records through =org-clock-agg-elem-format=, which also utilizes a format string comprising the following specifiers:
+- =%s=: Start of the time range
+- =%e=: End of the time range
+- =%d=: Duration of the time range
+- =%t=: Title of the record.
+
+The default value is:
+#+begin_example
+- [%s]--[%e] => %d : %t
+#+end_example
+
+** Custom grouping predicates
+It's possible to define custom grouping predicates in addition to the default ones. In fact, it's probably the only way to get grouping that is tailored to your particular org workflow; I haven't included my predicates in the package because they aren't general enough.
+
+To create new predicates, use =org-clock-agg-defgroupby=:
+#+begin_src emacs-lisp
+(org-clock-agg-defgroupby <name>
+  :key1 value1
+  :key2 value2
+  <body>)
+#+end_src
+
+The available keyword arguments include:
+- =:readable-name=: Function name for the UI.
+- =:default-sort=: Default sorting function.
+
+The body binds two variables - =elem= and =extra-params=, and must return a list of strings.
+
+The =elem= variable is an alist that represents one org-clock record. The keys are as follows:
+- =:start=: Start time in seconds since the epoch
+- =:end=: End time in seconds since the epoch
+- =:duration=: Duration in seconds
+- =:headline=: Instance of [[https://orgmode.org/worg/dev/org-element-api.html][org-element]] for the headline
+- =:tags=: List of tags
+- =:file=: File name
+- =:outline-path=: titles of all headlines from the root to the current headline
+- =:properties=: List of properties; =org-clock-agg-properties= sets the selection list
+- =:category=: [[https://orgmode.org/manual/Categories.html][Category]] of the current headline.
+
+The =extra-params= variable is an alist of global parameters controlling the function's behavior. Additional parameters can be added by customizing =org-clock-agg-extra-params=. This alist has keys as parameter names and values as [[https://www.gnu.org/software/emacs/manual/html_mono/widget.html][widget.el]] expressions (applied to =widget-create=) controlling the UI. Each widget must contain an =:extras-key= key.
+
+For instance:
+#+begin_src emacs-lisp
+(setq org-clock-agg-extra-params
+      '(("Events: Offline / Online" . (checkbox :extras-key :events-online))))
+#+end_src
+
+This adds a checkbox to the form that appears as:
+#+begin_example
+Events: Offline / Online [ ]
+#+end_example
+
+When checked, =extra-params= takes the value =((:extras-keys . t))=.
+
+Here's an example predicate. I store meetings the following way:
+#+begin_example
+,* Some project
+,** Meetings
+,*** Some meeting 1
+,*** Some meeting 2
+,* Another project
+,** Meetings
+,*** Another meeting 1
+,*** Another meeting 2 (offline)
+#+end_example
+
+I want to group these meetings by title, i.e. group all instances of "Some meeting", "Another meeting", etc. Optionally I want to group online and offline meetings.
+
+This can be done the following way:
+#+begin_src emacs-lisp
+(org-clock-agg-defgroupby event
+  :readable-name "Event"
+  :default-sort total
+  (let* ((title (org-element-property :raw-value (alist-get :headline elem)))
+         (is-meeting (or (string-match-p "meeting" (downcase title))
+                         (seq-contains-p (alist-get :tags elem) "mt")))
+         (is-offline (or (string-match-p "offline" (downcase title))
+                         (seq-contains-p (alist-get :tags elem) "offline")))
+         (title-without-stuff (string-trim
+                               (replace-regexp-in-string
+                                (rx (or
+                                     (group (+ (or digit ".")))
+                                     "(offline)"
+                                     (seq "[" (+ alnum) "]") ))
+                                "" title))))
+    (when is-meeting
+      `("Meeting"
+        ,@(when (alist-get :events-online extra-params)
+            (if is-offline '("Offline") '("Online")))
+        ,title-without-stuff))))
+#+end_src
+
+For the following result:
+#+begin_example
+,* Results
+,** Meetings
+,*** Some meeting
+,*** Another meeting
+,** Ungrouped
+#+end_example
+
+This can be coupled with a project predicate to analyze the time spent per project in a particular kind of meeting.
