@@ -25,12 +25,12 @@
 
 ;;; Commentary:
 
-;; Aggregate org-clock records and show the results in an interactive
-;; buffer.  The records are grouped by predicates such as file name,
-;; their outline path in the file, etc.  Each record is placed in a
-;; tree strcture; each node of the tree shows the total time spent in
-;; that node and its children.  The top-level node shows the total
-;; time spent in all records found by the query.
+;; Aggregate org-clock records and display the results in an
+;; interactive buffer.  org-clock records are grouped by predicates
+;; such as file name, their outline path in the file, etc.  Each
+;; record is placed in a tree structure; each node of the tree shows
+;; the total time spent in that node and its children.  The top-level
+;; node shows the total time spent in all records found by the query.
 ;;
 ;; `org-clock-agg' is the main entrypoint.  It can be run interactively
 ;; or from elisp code.  See the docstring for details.
@@ -56,41 +56,47 @@
 (defcustom org-clock-agg-duration-format "%h:%.2m"
   "Format string for durations in `org-clock-agg' views.
 
-See `format-seconds' for the list of available format specifiers."
+Refer to `format-seconds' for the available format specifiers."
   :type 'string
   :group 'org-clock-agg)
 
 (defcustom org-clock-agg-files-preset nil
-  "Presets for the \"files\" parameter in org-clock-agg views."
+  "Presets for the \"files\" parameter in `org-clock-agg' views."
   :type '(alist :key-type string :value-type (repeat string))
   :group 'org-clock-agg)
 
 (defcustom org-clock-agg-day-format "%Y-%m-%d, %a"
   "Format string for days in `org-clock-agg' views.
 
-See `format-time-string' for the list of available format specifiers."
+Refer to `format-time-string' for the available format
+specifiers."
   :type 'string
   :group 'org-clock-agg)
 
 (defcustom org-clock-agg-week-format "%Y-%W"
   "Format string for weeks in `org-clock-agg' views.
 
-See `format-time-string' for the list of available format specifiers."
+Refer to `format-time-string' for the list of available format
+specifiers."
   :type 'string
   :group 'org-clock-agg)
 
 (defcustom org-clock-agg-month-format "%Y-%m"
   "Format string for months in `org-clock-agg' views.
 
-See `format-time-string' for the list of available format specifiers."
+Refer to `format-time-string' for the list of available format
+specifiers."
   :type 'string
   :group 'org-clock-agg)
 
 (defcustom org-clock-agg-properties nil
   "Org properties to include in `org-clock-agg' views.
 
-Either set this interactively or reset the `org-ql-cache' variable
-manually after setting."
+The value of this variable should be a list of strings.
+
+Set this interactively or manually reset `org-ql-cache' and
+`org-ql-node-value-cache' after modification."
+
   :type '(repeat string)
   :group 'org-clock-agg
   :set (lambda (&rest _)
@@ -98,37 +104,36 @@ manually after setting."
          (setq org-ql-node-value-cache (make-hash-table :weakness 'key))))
 
 (defcustom org-clock-agg-node-title-width-delta 40
-  "How many characters to take away from the node title.
+  "How many characters to truncate from the node title.
 
-See `org-clock-agg-node-format' on how to set this."
+Refer to `org-clock-agg-node-format' for instructions on configuring
+this."
   :type 'integer
   :group 'org-clock-agg)
 
 (defcustom org-clock-agg-node-format "%-%(+ title-width)t %20c %8z"
-  "Format string for node title in `org-clock-agg' views.
+  "Format string for the node title in `org-clock-agg' views.
 
 The following format specifiers are available:
-- %t - node title with the level prefix, truncated to
-   `title-width' characters (see below)
-- %c - the name of the grouping function that produced the node
-   (the `:readable-name' parameter)
-- %z - time spent in node according to
-   `org-clock-agg-duration-format'.
+- %t - node title with the level prefix, truncated to `title-width'
+   characters (see below)
+- %c - name of the grouping function that produced the node (the
+   `:readable-name' parameter)
+- %z - time spent in the node according to
+   `org-clock-agg-duration-format'
 - %s - time share of the node against the parent node
 - %S - time share of the node against the top-level node
 
-See `format-spec' for the avaliable modifers.
+Refer to `format-spec' for available modifiers.
 
-This format string also evaluates elisp expressions in the
-%(...) blocks.  During evaluation, the following variables are
-bound:
-- `title-width' - `window-width' minus
-  `org-clock-agg-node-title-width-delta'
+This format string also evaluates Elisp expressions in the %(...)
+blocks.  During evaluation, the following variables are bound:
+- `title-width': `window-width' minus
+  `org-clock-agg-node-title-width-delta'.
 
-That way, in the default configuration, the node title is truncated to
-make the resulting string fit into the window.
-I.e. `org-clock-agg-node-title-width-delta' means how many characters
-to allocate for the rest of the string, without the node title."
+This way, in the default configuration, the node title is truncated to
+fit into the window, utilizing `org-clock-agg-node-title-width-delta'
+as the remaining characters for the rest of the string."
   :type 'string
   :group 'org-clock-agg)
 
@@ -141,12 +146,12 @@ The following format specifiers are available:
 - %d - duration of the time range
 - %t - title of the record.
 
-Formats of %s and %e are controlled by `org-time-stamp-formats'."
+The formats of %s and %e are controlled by `org-time-stamp-formats'."
   :type 'string
   :group 'org-clock-agg)
 
 (defconst org-clock-agg--extra-params-default
-  '(("Show elements:" . (checkbox :extras-key :show-elems))
+  '(("Show records:" . (checkbox :extras-key :show-elems))
     ("Add \"Ungrouped\"" . (checkbox :extras-key :add-ungrouped)))
   "Default set of extra parameters for `org-clock-agg' views.")
 
@@ -181,10 +186,6 @@ Formats of %s and %e are controlled by `org-time-stamp-formats'."
 It's probably supposed to be nil because it overrides the default
 element formatting."
   :group 'org-clock-agg)
-
-;; XXX org-ql caches results of queries, so make sure to run this
-;; after updating `org-clock-agg--parse-headline'
-;; (setq org-ql-cache (make-hash-table :weakness 'key))
 
 ;; This function appears in Emacs 29 and isn't avaliable in `compat'
 ;; for some reason
@@ -234,7 +235,7 @@ Return a list of alists with the following keys:
 
 `org-clock-agg-properties' sets the list of properties to select.  The
 properties are inherited from the parent headlines and from the global
-properties set in the beginning of the file."
+properties set at the beginning of the file."
   (let ((global-props
          (org-ql--value-at
           1 (lambda ()
@@ -296,16 +297,14 @@ list of properties to select
   "Normalize VAL to a time predicate.
 
 VAL can be either:
-- a number, in which case it's interpreted as a number of days from
-the current one
-- a string, parseable by `parse-time-string', with or without the time
-part.
+- A number interpreted as a number of days from the current one.
+- A string parseable by `parse-time-string', with or without the time
+  part.
 
-KIND is either \"from\" or \"to\".  If it's the latter, the time part is the
-to 23:59:59 when possible, otherwise it's 00:00:00.
+KIND is either \"from\" or \"to\".  If it's the latter, the time part
+is set to 23:59:59 when possible; otherwise, it's set to 00:00:00.
 
-The result is a number of seconds since the epoch."
-
+The result is the number of seconds since the epoch."
   (when-let (int-val
              (and (stringp val) (ignore-errors (number-to-string val))))
     (setq val int-val))
@@ -335,11 +334,10 @@ The result is a number of seconds since the epoch."
 (defun org-clock-agg--filter-elems (from to elems)
   "Filter ELEMS by FROM and TO.
 
-FROM and TO should either be a number (e.g. -7 is the last week) or a
-string parseable by `parse-time-string'.
+Refer to `org-clock-agg--normalize-time-predicate' for the possible
+values of FROM and TO.
 
-ELEMS is a list as descbribed in `org-clock-agg--parse-headline'."
-
+ELEMS is a list as described in `org-clock-agg--parse-headline'."
   (let ((from-date (org-clock-agg--normalize-time-predicate from 'from))
         (to-date (org-clock-agg--normalize-time-predicate to 'to)))
     (cl-loop for elem in elems
@@ -352,7 +350,10 @@ ELEMS is a list as descbribed in `org-clock-agg--parse-headline'."
 (defun org-clock-agg--query (from to files)
   "Query org files in FILES for clocked entries from FROM to TO.
 
-  Return a list as descbribed in `org-clock-agg--parse-headline'."
+Refer to `org-clock-agg--normalize-time-predicate' for the possible
+values of FROM and TO.
+
+Return a list as described in `org-clock-agg--parse-headline'."
   (thread-last
     (cl-loop for res in (org-ql-query
                           :select #'org-clock-agg--parse-headline
@@ -365,12 +366,13 @@ ELEMS is a list as descbribed in `org-clock-agg--parse-headline'."
 (defvar org-clock-agg-groupby-functions nil
   "Group by functions for `org-clock-agg'.
 
-This is an alist with function names as keys and alists with the
+This is an alist with function names as keys and alists containing the
 following keys as values:
-- `:function' - grouping function itself
+- `:function' - the grouping function itself
 - `:hidden' - whether to hide the function in the UI
 - `:readable-name' - name to display in the UI
-- `:default-sort' - default sorting function to use for this group.
+- `:default-sort' - default sorting function to use for this group (a
+  key of `org-clock-agg-sort-functions')
 
 See `org-clock-agg-defgroupby' on how to define new grouping
 functions.")
@@ -380,7 +382,7 @@ functions.")
 
 This is an alist with function names as keys and alists with the
 following keys as values:
-- `:function' - sorting function itself
+- `:function' - the sorting function itself
 - `:readable-name' - name to display in the UI.
 
 See `org-clock-agg-defsort' on how to define new sorting
@@ -393,11 +395,12 @@ functions.")
 BODY is a list of expressions.  PARAMS is a list of symbols starting
 with \":\".
 
-E.g. if BODY is (:foo 1 :bar 2 something something), the usage is as follows:
+E.g., if BODY is (:foo 1 :bar 2 something something), the usage is as
+follows:
 
 \(let \(foo bar)
-\(org-clock-agg--extract-params body :foo :bar)
-;; do something with foo and bar
+  \(org-clock-agg--extract-params body :foo :bar)
+  ;; do something with foo and bar
 )"
   `(let ((body-wo-docstring (if (stringp (car-safe ,body)) (cdr body) ,body))
          (docstring (when (stringp (car-safe ,body)) (car-safe ,body))))
@@ -417,19 +420,19 @@ E.g. if BODY is (:foo 1 :bar 2 something something), the usage is as follows:
 (cl-defmacro org-clock-agg-defgroupby (name &body body)
   "Define a grouping function for `org-clock-agg'.
 
-NAME is the name of the function.  BODY has the following variables bound:
+NAME is the name of the function.  BODY binds the following variables:
 - `elem' - an alist as described in `org-clock-agg--parse-headline'
-- `extra-params' - and alist with extra parameters.  See
+- `extra-params' - an alist with extra parameters.  See
   `org-clock-agg' on that.
-The function must return a list of strings, which are the group
-names.
 
-BODY can also contain the following keyword arguments:
-- `:readable-name' - function name for the UI.  If not given, the name
-of the function is used.
+The function must return a list of strings, which are the group names.
+
+BODY can also include the following keyword arguments:
+- `:readable-name' - function name for the UI.  If not given, NAME is
+  used.
 - `:hidden' - if non-nil, the function is not shown in the UI.
 - `:default-sort' - if non-nil, the function is used as the default
-sort function."
+  sort function."
   (declare (indent defun)
            (doc-string 2))
   (let ((func-name (intern (concat "org-clock-agg--groupby-" (symbol-name name))))
@@ -453,13 +456,13 @@ sort function."
 (cl-defmacro org-clock-agg-defsort (name &body body)
   "Define a sorting function for `org-clock-agg'.
 
-NAME is the name of the function.  BODY has a variable `nodes' bound,
-which is a list of tree nodes as described in
-function `org-clock-agg--groupby'.
+NAME is the name of the function.  BODY binds a `nodes' variable,
+which is a list of tree nodes as described in function
+`org-clock-agg--groupby'.
 
 BODY can also contain the following keyword arguments:
-- `:readable-name' - function name for the UI.  If not given, the name
-of the function is used."
+- `:readable-name' - function name for the UI.  If not given, NAME is
+  used."
   (declare (indent defun)
            (doc-string 2))
   (let ((func-name (intern (concat "org-clock-agg--sort-" (symbol-name name))))
@@ -612,19 +615,20 @@ of the function is used."
    #'> nodes))
 
 (defun org-clock-agg--groupby-apply (alist groups elem)
-  "Recursively perform the grouping for `org-clock-agg'.
+  "Recursively perform grouping for `org-clock-agg'.
 
-ALIST is the alist in which to store the results.  GROUPS is a list of
-groups for ELEM.  GROUPS is a list with the following values:
+ALIST is the alist used to store the results.  GROUPS is a list of
+groups for ELEM.  GROUPS is a list with the following structure for
+one group:
 - group name
 - parameters of the grouping function (as in the variable
-                                          `org-clock-agg-groupby-functions')
+  `org-clock-agg-groupby-functions')
 - name of the sorting function (keys of the variable
-                                     `org-clock-agg-sort-functions')
+  `org-clock-agg-sort-functions')
 - sort order (t to reverse).
 
-See the function `org-clock-agg--groupby' for the description of the
-return value."
+Refer to the function `org-clock-agg--groupby' for a description of
+the return value."
   (let* ((group-params (car groups))
          (key (nth 0 group-params))
          (groupby (nth 1 group-params))
@@ -651,13 +655,14 @@ return value."
 (defun org-clock-agg--add-ungrouped (tree)
   "Add \"Ungrouped\" nodes to TREE.
 
-Such node is added to every node in TREE that has both `:elems',
-i.e. ungrouped elements, and `:children'.  This can happen when only
-part of elements of the node was grouped by a grouping function.
+This function adds an \"Ungrouped\" node to every node in TREE that
+contains both `:elems' (ungrouped elements) and `:children'.  This
+can happen when only a portion of the elements of the node was grouped
+by a grouping function.
 
-Adding the \"Ungrouped\" node with all the ungrouped elements ensures that
-the total time spent in node equals the sum of the total time spent in
-its children.
+The addition of the \"Ungrouped\" node with all the ungrouped elements
+ensures that the total time spent in the node equals the sum of the
+total time spent in its children.
 
 TREE is a tree as returned by `org-clock-agg--groupby'."
   (dolist (node tree)
@@ -687,7 +692,7 @@ TREE is a tree as returned by `org-clock-agg--groupby'."
 (defun org-clock-agg--groupby-postaggregate (tree &optional total-time parent-time)
   "Perform final aggregation calculations on TREE.
 
-This function sets the following fields on each tree node:
+Sets the following fields on each tree node:
 - `:parent-share'
 - `:total-share'
 
@@ -711,28 +716,29 @@ TOTAL-TIME and PARENT-TIME are recursive parameters."
 
 ELEMS is a list as described in `org-clock-agg--parse-headline'.
 GROUPBY-LIST is a list of keys of the variable
-`org-clock-agg-groupby-functions'.  SORT-LIST is a list of keys of the variable
-`org-clock-agg-sort-functions'.  SORT-ORDER-LIST is a list of booleans
-indicating whether to reverse the sort order for the corresponding key
-in SORT-LIST.
+`org-clock-agg-groupby-functions'.  SORT-LIST is a list of keys of
+the variable `org-clock-agg-sort-functions'.  SORT-ORDER-LIST is a
+list of booleans indicating whether to reverse the sort order for the
+corresponding key in SORT-LIST.
 
 The root group is always added to the beginning of GROUPBY-LIST.
 
 EXTRA-PARAMS is an alist of extra parameters for the grouping
-functions.  If `:add-ungrouped' is non-nil, add \"Ungrouped\" nodes to
-the tree.  See `org-clock-agg' for more.
+functions.  If `:add-ungrouped' is non-nil, \"Ungrouped\" nodes are
+added to the tree.  See `org-clock-agg' for details.
 
 The return value is a tree of alists with the following keys:
-- `:total' - total seconds spent in group
-- `:parent-share' - `:total' / time spent in parent node
+- `:total' - total seconds spent in the group
+- `:parent-share' - `:total' / time spent in the parent node
 - `:total-share' - `:total' / time spent in the top-level node
 - `:groupby' - grouping function (as in the variable
-                                     `org-clock-agg-groupby-functions')
+  `org-clock-agg-groupby-functions')
 - `:children' - list of children tree nodes
-- `:sort-symbol' - key of the variable `org-clock-agg-sort-functions' used for
-sorting
-- `:sort-order' - if non-nil, reverse the sort order
-- `:elems' - list of elements in the group, same form as ELEMS."
+- `:sort-symbol' - key of the variable `org-clock-agg-sort-functions'
+  used for sorting
+- `:sort-order' - if non-nil, the sort order is reversed
+- `:elems' - list of elements in the group, in the same form as
+  ELEMS."
   (let (tree)
     (dolist (elem elems)
       (let* ((group-symbols (cons 'root-group groupby-list))
@@ -872,7 +878,8 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
   "Render the date picker for the `org-clock-agg' buffer."
   (widget-create 'editable-field
                  :size 20
-                 :format (concat (propertize "Date from: " 'face 'widget-button) "%v   ")
+                 :format (concat (propertize "Date from: " 'face 'widget-button)
+                                 "%v   ")
                  :value (let ((val (alist-get :from org-clock-agg--params)))
                           (if (numberp val)
                               (number-to-string val)
@@ -902,10 +909,12 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
   (widget-create 'editable-list
                  :tag "Group by"
                  :entry-format "%i %d %v"
-                 :value (cl-loop for group-value in (alist-get :groupby org-clock-agg--params)
-                                 for sort-value in (alist-get :sort org-clock-agg--params)
-                                 for sort-order-value in (alist-get :sort-order org-clock-agg--params)
-                                 collect (list group-value sort-value sort-order-value))
+                 :value
+                 (cl-loop for group-value in (alist-get :groupby org-clock-agg--params)
+                          for sort-value in (alist-get :sort org-clock-agg--params)
+                          for sort-order-value in
+                          (alist-get :sort-order org-clock-agg--params)
+                          collect (list group-value sort-value sort-order-value))
                  :notify
                  (lambda (widget _changed-widget &optional _event)
                    (let ((group-value (mapcar #'car (widget-value widget)))
@@ -913,16 +922,18 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
                          (sort-order-value (mapcar #'caddr (widget-value widget))))
                      (setf (alist-get :groupby org-clock-agg--params) group-value)
                      (setf (alist-get :sort org-clock-agg--params) sort-value)
-                     (setf (alist-get :sort-order org-clock-agg--params) sort-order-value)))
+                     (setf (alist-get :sort-order org-clock-agg--params)
+                           sort-order-value)))
                  `(group
                    :value (outline-path total)
                    (menu-choice
                     :tag "Group"
                     :notify (lambda (widget _child &optional event)
                               (if-let* ((value (widget-value widget))
-                                        (default-sort (alist-get
-                                                       :default-sort
-                                                       (alist-get value org-clock-agg-groupby-functions)))
+                                        (default-sort
+                                         (alist-get
+                                          :default-sort
+                                          (alist-get value org-clock-agg-groupby-functions)))
                                         (parent (widget-get widget :parent)))
                                   (widget-value-set parent (list value default-sort)))
                               (widget-default-action widget event))
@@ -930,12 +941,13 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
                         org-clock-agg-groupby-functions
                         (seq-filter (lambda (groupby)
                                       (not (alist-get :hidden (cdr groupby)))))
-                        (mapcar (lambda (groupby)
-                                  (let ((name (car groupby))
-                                        (readable-name (alist-get :readable-name (cdr groupby))))
-                                    `(item :tag ,readable-name
-                                           :value ,name
-                                           :menu-tag ,readable-name))))))
+                        (mapcar
+                         (lambda (groupby)
+                           (let ((name (car groupby))
+                                 (readable-name (alist-get :readable-name (cdr groupby))))
+                             `(item :tag ,readable-name
+                                    :value ,name
+                                    :menu-tag ,readable-name))))))
                    (menu-choice
                     :tag "Order"
                     ,@(mapcar
@@ -1186,42 +1198,44 @@ return value description."
 (defun org-clock-agg (from to files groupby sort sort-order extra-params)
   "Aggregate org-clock data.
 
-The function creates an interactive buffer to configure the
-aggregation and display the results.  If functions is called
-non-interactively, intials parameters can be passed as arguments.
+The function creates an interactive buffer for configuring the
+aggregation and displaying the results.  When called
+non-interactively, initial parameters can be passed as arguments.
 
-Use `org-clock-agg-exec' if you want to retrive the results
-without the interactive buffer.
+Use `org-clock-agg-exec' to retrieve the results without the
+interactive buffer.
 
-FROM and TO define the time range.  Both are `org-ql' time predicates,
-that is a number of days (e.g. -7 for the last week) or a date
-parseable by `parse-time-string'.
+FROM and TO define the time range.  Both are either a relative number
+of days, or a date string parseable by `parse-time-string', with or
+without the time part.  See `org-clock-agg--normalize-time-predicate'
+for details.
 
-FILES is either `org-agenda', a key of `org-clock-agg-files-preset' (in
-which case the value of that variable is used) or a list of files.
+FILES is either `org-agenda', a key from `org-clock-agg-files-preset'
+\(in which case the value of that variable is used), or a list of
+file paths.
 
-GROUPBY is a list of keys of `org-clock-agg-groupby-functions'.  Each
-function returns a list of groups for each entry; the result is a
-tree.  SORT is a list of keys of `org-clock-agg-sort-functions' that
-has to be the same length as GROUPBY.  Nth entry is the SORT list
-defines the sort logic for the results of the Nth GROUPBY function.
+GROUPBY is a list of keys from `org-clock-agg-groupby-functions'.
+Each function returns a list of groups for each entry; the result
+forms a tree.  SORT is a list of keys from
+`org-clock-agg-sort-functions', and its length must match GROUPBY.
+The Nth entry in SORT defines the sorting logic for the results of the
+Nth GROUPBY function.
 
-SORT-ORDER has to be the same length as SORT.  If Nth entry is non-nil,
-the sorting is reversed.
+SORT-ORDER must be of the same length as SORT.  If the Nth entry is
+non-nil, the sorting is reversed.
 
-EXTRA-PARAMS is an alist of \"extra parameters\".  Possible keys are
+EXTRA-PARAMS is an alist of 'extra parameters.'  Possible keys are
 defined by `org-clock-agg--extra-params-default' and
-`org-clock-agg-extra-params'.  The built-in parameters are:
-- `:show-elems' - whether to show raw elements for each group in the
-  buffer.  An \"element\" is one org-clock record.
-- `:add-ungrouped' - whether to add the \"Ungrouped\" group to the
+`org-clock-agg-extra-params'.  Built-in parameters include:
+- `:show-elems' - whether to display raw elements for each group in
+  the buffer (an 'element' represents one org-clock record).
+- `:add-ungrouped' - whether to add the 'Ungrouped' group to the
   results.
 
-`org-clock-agg-extra-params' can be used to define new parameters.
-This is meant to be used by custom aggregation functions to control
-their behavior in runtime.
+`org-clock-agg-extra-params' can define new parameters, intended for
+custom aggregation functions to control their behavior at runtime.
 
-See the mentioned variables for and the interactive buffer for the
+Refer to the mentioned variables and the interactive buffer for
 available group and sort functions; use `org-clock-agg-defgroupby' and
 `org-clock-agg-defsort' to define new ones."
   (interactive (list -7 0 'org-agenda nil nil nil nil))
