@@ -1,8 +1,8 @@
 #+TITLE: org-clock-agg
 
-Aggregate [[https://orgmode.org/manual/Clocking-Work-Time.html][org-clock]] records and display the results in an interactive buffer. =org-clock= records are grouped by predicates such as file name, their outline path in the file, etc. Each record is placed in a tree structure; each node of the tree shows the total time spent in that node and its children. The top-level node shows the total time spent in all records found by the query.
+Aggregate [[https://orgmode.org/manual/Clocking-Work-Time.html][org-clock]] records and display the results in an interactive buffer. The records are grouped by predicates such as file name, their outline path in the file, etc. Each record is placed in a tree structure; each node of the tree shows the total time spent in that node and its children. The top-level node shows the total time spent in all records found by the query.
 
-SCREENSHOT
+[[./img/screenshot.png]]
 
 * Installation
 The package isn't yet available anywhere but in this repository. My preferred way for such cases is [[https://github.com/jwiegley/use-package][use-package]] and [[https://github.com/radian-software/straight.el][straight.el]]:
