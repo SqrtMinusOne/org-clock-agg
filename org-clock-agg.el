@@ -1224,12 +1224,12 @@ Nth GROUPBY function.
 SORT-ORDER must be of the same length as SORT.  If the Nth entry is
 non-nil, the sorting is reversed.
 
-EXTRA-PARAMS is an alist of 'extra parameters.'  Possible keys are
+EXTRA-PARAMS is an alist of \"extra parameters\".  Possible keys are
 defined by `org-clock-agg--extra-params-default' and
 `org-clock-agg-extra-params'.  Built-in parameters include:
 - `:show-elems' - whether to display raw elements for each group in
-  the buffer (an 'element' represents one org-clock record).
-- `:add-ungrouped' - whether to add the 'Ungrouped' group to the
+  the buffer (an \"element\" represents one org-clock record).
+- `:add-ungrouped' - whether to add the \"Ungrouped\" group to the
   results.
 
 `org-clock-agg-extra-params' can define new parameters, intended for
