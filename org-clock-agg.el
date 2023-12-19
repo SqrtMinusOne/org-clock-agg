@@ -121,8 +121,8 @@ The following format specifiers are available:
    `:readable-name' parameter)
 - %z - time spent in the node according to
    `org-clock-agg-duration-format'
-- %s - time share of the node against the parent node
-- %S - time share of the node against the top-level node
+- %S - time share of the node against the parent node
+- %s - time share of the node against the top-level node
 
 Refer to `format-spec' for available modifiers.
 
@@ -1253,6 +1253,10 @@ available group and sort functions; use `org-clock-agg-defgroupby' and
                     (:extra-params . ,extra-params)))
       (let ((inhibit-read-only t))
         (org-clock-agg--render-controls)
+        ;; XXX No idea why, but setting these variables with let
+        ;; doesn't work when the package is loaded.
+        (setq-local widget-push-button-prefix "")
+        (setq-local widget-push-button-suffix "")
         (org-clock-agg-refresh))
       (goto-char (point-min)))))
 
