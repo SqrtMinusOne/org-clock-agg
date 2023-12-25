@@ -7,6 +7,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.2") (compat "29.1.4.1") (org-ql "0.8-pre"))
 ;; Homepage: https://github.com/SqrtMinusOne/org-clock-agg
+;; Published-At: 2023-12-17
 
 ;; This file is NOT part of GNU Emacs.
 
