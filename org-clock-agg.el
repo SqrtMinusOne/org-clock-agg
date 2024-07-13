@@ -62,7 +62,10 @@ Refer to `format-seconds' for the available format specifiers."
   :group 'org-clock-agg)
 
 (defcustom org-clock-agg-files-preset nil
-  "Presets for the \"files\" parameter in `org-clock-agg' views."
+  "Presets for the \"files\" parameter in `org-clock-agg' views.
+
+The variable is an alist with preset names as keys and lists of
+file names as values."
   :type '(alist :key-type string :value-type (repeat string))
   :group 'org-clock-agg)
 
@@ -842,11 +845,13 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
   (let ((keymap (make-sparse-keymap)))
     (define-key keymap (kbd "q") #'org-clock-agg-quit)
     (define-key keymap (kbd "r") #'org-clock-agg-refresh)
+    (define-key keymap (kbd "E") #'org-clock-agg-view-elems-at-point)
     (define-key keymap (kbd "<tab>") #'outline-toggle-children)
     (when (fboundp 'evil-define-key*)
       (evil-define-key* 'normal keymap
         "q" #'org-clock-agg-quit
         "gr" #'org-clock-agg-refresh
+        "E" #'org-clock-agg-view-elems-at-point
         (kbd "<tab>") #'outline-toggle-children))
     keymap))
 
@@ -1122,17 +1127,35 @@ elements as well.  LEVEL is the level of the node."
                           org-clock-agg-duration-format
                           (alist-get :total (cdr node)))
                          'face 'org-clock-agg-duration-face)))))
-    (insert (format-spec
-             (org-clock-agg--process-format-spec
-              org-clock-agg-node-format
-              `((title-width . ,title-width)))
-             spec)
+    (insert (propertize
+             (format-spec
+              (org-clock-agg--process-format-spec
+               org-clock-agg-node-format
+               `((title-width . ,title-width)))
+              spec)
+             'node node)
             "\n")
     (when show-elems
       (org-clock-agg-render-tree-node-elems node)))
   (mapc (lambda (child)
           (org-clock-agg--render-tree-node child show-elems (1+ level)))
         (alist-get :children (cdr node))))
+
+(defun org-clock-agg-view-elems-at-point ()
+  "View elements of the `org-clock-agg' node at point."
+  (interactive)
+  (let ((node-at-point (get-text-property (point) 'node)))
+    (unless node-at-point
+      (user-error "No node at point!"))
+    (let* ((elems (org-clock-agg--ungroup (list node-at-point)))
+           (strings (mapcar (lambda (elem)
+                              (org-ql-view--format-element
+                               (alist-get :headline elem)))
+                            elems)))
+      (org-ql-view--display
+        :buffer "*org-clock-agg-elems*"
+        :header (format "Elements: %s" (car node-at-point))
+        :strings strings))))
 
 (defun org-clock-agg--parse-files (files)
   "Return a list of files to use in the `org-clock-agg' buffer.

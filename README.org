@@ -106,6 +106,9 @@ Ensure to use =setopt= to set the variables; otherwise, the customization logic 
 
 Refer also to [[*Custom grouping predicates][custom grouping predicates]].
 
+** Commands in the interactive buffer
+Press =E= (or =M-x org-clock-agg-view-elems-at-point=) on a tree element to view the constituent headings. =org-ql= is used to render the heading list.
+
 * Customization
 ** Node Formatting
 The =org-clock-agg-node-format= variable determines the formatting of individual tree nodes. This uses a [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Custom-Format-Strings.html][format string]] that with the following format specifiers avaiable:
