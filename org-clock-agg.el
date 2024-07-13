@@ -50,6 +50,10 @@
 (require 'compat)
 (require 'org-ql)
 
+;; XXX byte-compiler on 29.4 started to want this, don't know why
+(defvar widget-push-button-prefix)
+(defvar widget-push-button-suffix)
+
 (defgroup org-clock-agg nil
   "Aggregate org-clock statistics."
   :group 'org-clock)
@@ -1144,6 +1148,9 @@ elements as well.  LEVEL is the level of the node."
 (defun org-clock-agg-view-elems-at-point ()
   "View elements of the `org-clock-agg' node at point."
   (interactive)
+  ;; `org-ql' doesn't requrire this by default, I assume for
+  ;; optimization purposes.  I won't interfere.
+  (require 'org-ql-view)
   (let ((node-at-point (get-text-property (point) 'node)))
     (unless node-at-point
       (user-error "No node at point!"))
