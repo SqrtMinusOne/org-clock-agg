@@ -1072,12 +1072,11 @@ NODE is one node of a tree, which is described in the function
                 (?d . ,(org-duration-from-minutes
                         (/ (alist-get :duration elem) 60)))
                 (?t . ,(concat
-                        (when-let ((todo-keyword (substring-no-properties
-                                                  (org-element-property
-                                                   :todo-keyword
-                                                   (alist-get :headline elem)))))
+                        (when-let ((todo-keyword
+                                    (org-element-property
+                                     :todo-keyword (alist-get :headline elem))))
                           (propertize
-                           (concat todo-keyword " ") 'face
+                           (concat (substring-no-properties todo-keyword) " ") 'face
                            (if (eq (org-element-property
                                     :todo-type (alist-get :headline elem))
                                    'done)
