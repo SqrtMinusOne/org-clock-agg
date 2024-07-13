@@ -50,6 +50,9 @@
 (require 'compat)
 (require 'org-ql)
 
+(eval-when-compile
+  (require 'org-ql-view))
+
 ;; XXX byte-compiler on 29.4 started to want this, don't know why
 (defvar widget-push-button-prefix)
 (defvar widget-push-button-suffix)
