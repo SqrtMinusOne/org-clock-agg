@@ -522,7 +522,8 @@ BODY can also contain the following keyword arguments:
   "Group org-clock entries by headline."
   :readable-name "Headline"
   :default-sort total
-  (list (org-element-property :raw-value (alist-get :headline elem))))
+  (list (substring-no-properties
+         (org-element-property :raw-value (alist-get :headline elem)))))
 
 (org-clock-agg-defgroupby day
   :readable-name "Day"
@@ -1018,6 +1019,16 @@ WIDGET is the instance of the widget that was changed."
                            (org-clock-agg-refresh))
                  "Refresh")
   (insert " ")
+  (widget-create 'push-button
+                 :notify (lambda (&rest _)
+                           (org-clock-agg-view-elems))
+                 "View records")
+  (insert " ")
+  (widget-create 'push-button
+                 :notify (lambda (&rest _)
+                           (org-clock-agg-csv))
+                 "Export records to CSV")
+  (insert " ")
   (unless (org-clock-agg--drill-down-p)
     (widget-create 'push-button
                    :notify (lambda (&rest _)
@@ -1159,24 +1170,33 @@ elements as well.  LEVEL is the level of the node."
           (org-clock-agg--render-tree-node child show-elems (1+ level)))
         (alist-get :children (cdr node))))
 
-(defun org-clock-agg-view-elems-at-point ()
-  "View elements of the `org-clock-agg' node at point."
-  (interactive)
+(defun org-clock-agg--view-elems (tree)
+  "View elements of an `org-clock-agg' TREE with `org-ql'."
   ;; `org-ql' doesn't requrire this by default, I assume for
   ;; optimization purposes.  I won't interfere.
   (require 'org-ql-view)
+  (let* ((elems (org-clock-agg--ungroup tree))
+         (strings (mapcar (lambda (elem)
+                            (org-ql-view--format-element
+                             (alist-get :headline elem)))
+                          elems)))
+    (org-ql-view--display
+      :buffer "*org-clock-agg-elems*"
+      :header (format "Elements: %s" (if (length= tree 1) (caar tree) "tree"))
+      :strings strings)))
+
+(defun org-clock-agg-view-elems-at-point ()
+  "View elements of an `org-clock-agg' node at point."
+  (interactive)
   (let ((node-at-point (get-text-property (point) 'node)))
     (unless node-at-point
       (user-error "No node at point!"))
-    (let* ((elems (org-clock-agg--ungroup (list node-at-point)))
-           (strings (mapcar (lambda (elem)
-                              (org-ql-view--format-element
-                               (alist-get :headline elem)))
-                            elems)))
-      (org-ql-view--display
-        :buffer "*org-clock-agg-elems*"
-        :header (format "Elements: %s" (car node-at-point))
-        :strings strings))))
+    (org-clock-agg--view-elems (list node-at-point))))
+
+(defun org-clock-agg-view-elems ()
+  "View the found elements in the current `org-clock-agg' buffer."
+  (interactive)
+  (org-clock-agg--view-elems org-clock-agg--tree))
 
 (defun org-clock-agg-drill-down-at-point ()
   "Open the report buffer solely for the element at point."
@@ -1264,6 +1284,73 @@ return value description."
              (apply #'org-clock-agg
                     '(,from ,to ,files ,groupby ,sort ,sort-order ,extra-params)))))))
     (switch-to-buffer buffer)))
+
+(defun org-clock-agg--csv-elems-to-alist (elems)
+  "Convert ELEMS to an alist.
+
+ELEMS is a list as described in `org-clock-agg--parse-headline'."
+  (cl-loop for elem in elems
+           collect
+           `((start . ,(thread-last elem
+                                    (alist-get :start)
+                                    (seconds-to-time)
+                                    (format-time-string (cdr org-time-stamp-formats))))
+             (end . ,(thread-last elem
+                                  (alist-get :end)
+                                  (seconds-to-time)
+                                  (format-time-string (cdr org-time-stamp-formats))))
+             (duration . ,(alist-get :duration elem))
+             (headline . ,(car (org-clock-agg--groupby-headline elem nil)))
+             (todo-keyword . ,(car (org-clock-agg--groupby-todo elem nil)))
+             (is-done . ,(car (org-clock-agg--groupby-is-done elem nil)))
+             (day-of-week . ,(car (org-clock-agg--groupby-day-of-week elem nil)))
+             (category . ,(car (org-clock-agg--groupby-category elem nil)))
+             (org-file . ,(car (org-clock-agg--groupby-org-file elem nil)))
+             (outline-path . ,(string-join
+                               (org-clock-agg--groupby-outline-path elem nil) "/"))
+             (tags . ,(string-join
+                       (org-clock-agg--groupby-tags elem nil) "/")))))
+
+(defun org-clock-agg--csv-alist-to-string (data)
+  "Convert DATA to csv string.
+
+DATA has to be an alist, where each item has the same set of
+attributes."
+  (concat
+   (mapconcat
+    (lambda (datum)
+      (symbol-name (car datum)))
+    (car data)
+    ",")
+   "\n"
+   (cl-loop with keys = (mapcar #'car (car data))
+            for datum in data
+            concat (mapconcat
+                    (lambda (key)
+                      (let ((item (alist-get key datum)))
+                        (cond ((numberp item) (format "%s" item))
+                              ((and (stringp item)
+                                    (string-match-p (rx (| " " "," "\"")) item))
+                               (format "\"%s\"" (string-replace
+                                                 "\""
+                                                 "\"\""
+                                                 item)))
+                              ((stringp item) (format "%s" item))
+                              (t ""))))
+                    keys ",")
+            concat "\n")))
+
+(defun org-clock-agg-csv ()
+  "Export the found elements in the `org-clock-agg' buffer as CSV."
+  (interactive)
+  (unless org-clock-agg--elems
+    (user-error "Nothing found in the current buffer!"))
+  (let* ((data (org-clock-agg--csv-elems-to-alist
+                org-clock-agg--elems))
+         (csv-string (org-clock-agg--csv-alist-to-string data))
+         (file-name (read-file-name "Save CSV: " nil "report.csv")))
+    (with-temp-file file-name
+      (insert csv-string))))
 
 (defun org-clock-agg (from to files groupby sort sort-order extra-params)
   "Aggregate org-clock data.
