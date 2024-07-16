@@ -365,13 +365,15 @@ Refer to `org-clock-agg--normalize-time-predicate' for the possible
 values of FROM and TO.
 
 Return a list as described in `org-clock-agg--parse-headline'."
-  (thread-last
-    (cl-loop for res in (org-ql-query
-                          :select #'org-clock-agg--parse-headline
-                          :from files
-                          :where `(clocked :from ,from :to ,to))
-             append res)
-    (org-clock-agg--filter-elems from to)))
+  (if (org-clock-agg--drill-down-p)
+      org-clock-agg--elems
+    (thread-last
+      (cl-loop for res in (org-ql-query
+                            :select #'org-clock-agg--parse-headline
+                            :from files
+                            :where `(clocked :from ,from :to ,to))
+               append res)
+      (org-clock-agg--filter-elems from to))))
 
 ;;; Aggregation
 (defvar org-clock-agg-groupby-functions nil
@@ -852,13 +854,15 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
   (let ((keymap (make-sparse-keymap)))
     (define-key keymap (kbd "q") #'org-clock-agg-quit)
     (define-key keymap (kbd "r") #'org-clock-agg-refresh)
-    (define-key keymap (kbd "E") #'org-clock-agg-view-elems-at-point)
+    (define-key keymap (kbd "e") #'org-clock-agg-view-elems-at-point)
+    (define-key keymap (kbd "d") #'org-clock-agg-drill-down-at-point)
     (define-key keymap (kbd "<tab>") #'outline-toggle-children)
     (when (fboundp 'evil-define-key*)
       (evil-define-key* 'normal keymap
         "q" #'org-clock-agg-quit
         "gr" #'org-clock-agg-refresh
-        "E" #'org-clock-agg-view-elems-at-point
+        "e" #'org-clock-agg-view-elems-at-point
+        "d" #'org-clock-agg-drill-down-at-point
         (kbd "<tab>") #'outline-toggle-children))
     keymap))
 
@@ -990,14 +994,21 @@ WIDGET is the instance of the widget that was changed."
     (apply #'widget-create `(,@params :notify org-clock-agg--extras-notify))
     (insert "\n")))
 
+(defun org-clock-agg--drill-down-p ()
+  "Whether the current buffer is drill-down for the previous query."
+  (eq (alist-get :files org-clock-agg--params) 'drill))
+
 (defun org-clock-agg--render-controls ()
   "Render controls for the `org-clock-agg' buffer."
   (remove-overlays)
   (insert (propertize "* Parameters" 'face 'org-level-1) "\n")
-  (org-clock-agg--render-controls-files)
-  (insert "\n")
-  (org-clock-agg--render-controls-date)
-  (insert "\n\n")
+  (if (org-clock-agg--drill-down-p)
+      (insert (propertize "Files" 'face 'widget-inactive)
+              ": Drill down previous query\n\n")
+    (org-clock-agg--render-controls-files)
+    (insert "\n")
+    (org-clock-agg--render-controls-date)
+    (insert "\n\n"))
   (org-clock-agg--render-controls-groupby)
   (insert "\n")
   (org-clock-agg--render-extra-params)
@@ -1007,10 +1018,11 @@ WIDGET is the instance of the widget that was changed."
                            (org-clock-agg-refresh))
                  "Refresh")
   (insert " ")
-  (widget-create 'push-button
-                 :notify (lambda (&rest _)
-                           (org-clock-agg-generate-report))
-                 "Create function")
+  (unless (org-clock-agg--drill-down-p)
+    (widget-create 'push-button
+                   :notify (lambda (&rest _)
+                             (org-clock-agg-generate-report))
+                   "Create function"))
   (insert "\n\n")
   (widget-setup))
 
@@ -1165,6 +1177,31 @@ elements as well.  LEVEL is the level of the node."
         :buffer "*org-clock-agg-elems*"
         :header (format "Elements: %s" (car node-at-point))
         :strings strings))))
+
+(defun org-clock-agg-drill-down-at-point ()
+  "Open the report buffer solely for the element at point."
+  (interactive)
+  (let ((node-at-point (get-text-property (point) 'node)))
+    (unless node-at-point
+      (user-error "No node at point!"))
+    (let ((buffer (generate-new-buffer (format "*org-clock-agg-drill-down-%s*"
+                                               (car node-at-point))))
+          (params (copy-tree org-clock-agg--params)))
+      (setf (alist-get :files params) 'drill)
+      (switch-to-buffer-other-window buffer)
+      (with-current-buffer buffer
+        (org-clock-agg-tree-mode)
+        (setq-local org-clock-agg--elems (org-clock-agg--ungroup
+                                          (list node-at-point)))
+        (setq-local org-clock-agg--params params)
+        (let ((inhibit-read-only t))
+          (org-clock-agg--render-controls)
+          ;; XXX No idea why, but setting these variables with let
+          ;; doesn't work when the package is loaded.
+          (setq-local widget-push-button-prefix "")
+          (setq-local widget-push-button-suffix "")
+          (org-clock-agg-refresh))
+        (goto-char (point-min))))))
 
 (defun org-clock-agg--parse-files (files)
   "Return a list of files to use in the `org-clock-agg' buffer.
