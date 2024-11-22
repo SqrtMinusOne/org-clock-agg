@@ -717,11 +717,11 @@ TOTAL-TIME and PARENT-TIME are recursive parameters."
   (dolist (node tree)
     (let ((total (float (alist-get :total (cdr node)))))
       (setf (alist-get :parent-share (cdr node))
-            (if (> 0 parent-time)
+            (if (< 0 parent-time)
                 (/ total (float parent-time))
               0)
             (alist-get :total-share (cdr node))
-            (if (> 0 total-time)
+            (if (< 0 total-time)
                 (/ total (float total-time))
               0))
       (org-clock-agg--groupby-postaggregate
