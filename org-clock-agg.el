@@ -305,6 +305,7 @@ list of properties to select
                       (:properties . ,properties)
                       (:category . ,category)))))
 
+;; TODO use `org-read-date'
 (defun org-clock-agg--normalize-time-predicate (val kind)
   "Normalize VAL to a time predicate.
 
@@ -554,7 +555,9 @@ BODY can also contain the following keyword arguments:
   :readable-name "TODO keyword"
   :default-sort total
   (list (substring-no-properties
-         (org-element-property :todo-keyword (alist-get :headline elem)))))
+         (or
+          (org-element-property :todo-keyword (alist-get :headline elem))
+          "No TODO"))))
 
 (org-clock-agg-defgroupby is-done
   :readable-name "Is done"
@@ -1352,6 +1355,52 @@ attributes."
     (user-error "Nothing found in the current buffer!"))
   (let* ((data (org-clock-agg--csv-elems-to-alist
                 org-clock-agg--elems))
+         (csv-string (org-clock-agg--csv-alist-to-string data))
+         (file-name (read-file-name "Save CSV: " nil "report.csv")))
+    (with-temp-file file-name
+      (insert csv-string))))
+
+(defun org-clock-agg--flatten-tree (tree &optional attrs)
+  "Flatten an `org-clock-agg' TREE.
+
+TREE is as defined by `org-clock-agg--groupby'.  ATTRS is a recursive
+parameter."
+
+  (let (res)
+    (cl-loop for (name . node) in tree
+             for groupby-name = (intern
+                                 (string-replace
+                                  " " "-"
+                                  (downcase
+                                   (alist-get :readable-name
+                                              (alist-get :groupby node)))))
+             if (seq-empty-p (alist-get :children node))
+             do (push
+                 `((name . ,name)
+                   (total . ,(alist-get :total node))
+                   (parent-share . ,(alist-get :parent-share node))
+                   (total-share . ,(alist-get :total-share node))
+                   (elems-count . ,(seq-length (alist-get :elems node)))
+                   (,groupby-name . ,name)
+                   ,@attrs)
+                 res)
+             else
+             do (setq res
+                      (append
+                       (org-clock-agg--flatten-tree
+                        (alist-get :children node)
+                        `(,@attrs
+                          (,groupby-name . ,name)))
+                       res nil)))
+    res))
+
+(defun org-clock-agg-tree-csv ()
+  "Export the current `org-clock-agg' tree into CSV."
+  (interactive)
+  (unless org-clock-agg--tree
+    (user-error "Tree not found"))
+  (let* ((data (org-clock-agg--flatten-tree
+                org-clock-agg--tree))
          (csv-string (org-clock-agg--csv-alist-to-string data))
          (file-name (read-file-name "Save CSV: " nil "report.csv")))
     (with-temp-file file-name
