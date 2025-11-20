@@ -216,30 +216,31 @@ Return a list of alists with the following keys:
 - `:start' - start time in seconds since the epoch
 - `:end' - end time in seconds since the epoch
 - `:duration' - duration in seconds."
-  (let ((contents (buffer-substring-no-properties
-                   ;; contents-begin starts after the headline
-                   (org-element-property :contents-begin headline)
-                   (org-element-property :contents-end headline))))
-    (with-temp-buffer
-      (insert contents)
-      (let (res)
-        (org-element-map (org-element-parse-buffer) 'clock
-          (lambda (clock)
-            (let ((start (time-convert
-                          (org-timestamp-to-time (org-element-property :value clock))
-                          'integer))
-                  (end (time-convert
-                        (org-timestamp-to-time (org-element-property :value clock) t)
-                        'integer)))
-              (push
-               `((:start . ,start)
-                 (:end . ,end)
-                 (:duration . ,(- end start)))
-               res)))
-          ;; The last argument stops parsing after the first headline.
-          ;; So only clocks in the first headline are parsed.
-          nil nil 'headline)
-        res))))
+  (save-restriction
+    ;; I used to insert a substring into a separate buffer to run
+    ;; `org-element-parse-buffer', but somehow this broke on the most
+    ;; recent `org-mode'.
+    (narrow-to-region
+     (org-element-property :contents-begin headline)
+     (org-element-property :contents-end headline))
+    (let (res)
+      (org-element-map (org-element-parse-buffer) 'clock
+        (lambda (clock)
+          (let ((start (time-convert
+                        (org-timestamp-to-time (org-element-property :value clock))
+                        'integer))
+                (end (time-convert
+                      (org-timestamp-to-time (org-element-property :value clock) t)
+                      'integer)))
+            (push
+             `((:start . ,start)
+               (:end . ,end)
+               (:duration . ,(- end start)))
+             res)))
+        ;; The last argument stops parsing after the first headline.
+        ;; So only clocks in the first headline are parsed.
+        nil nil 'headline)
+      res)))
 
 (defun org-clock-agg--properties-at-point ()
   "Return a list of selected properties at point.
