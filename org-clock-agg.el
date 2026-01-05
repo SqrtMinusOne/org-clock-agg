@@ -1015,9 +1015,19 @@ WIDGET is the instance of the widget that was changed."
   "Render extra-params for the `org-clock-agg' buffer."
   (pcase-dolist (`(,name . ,params) (append org-clock-agg--extra-params-default
                                             org-clock-agg-extra-params))
-    (insert (propertize name 'face 'widget-button) " ")
-    (apply #'widget-create `(,@params :notify org-clock-agg--extras-notify))
-    (insert "\n")))
+    (let* ((extras-key (cl-loop for key in params
+                                for value in (cdr params)
+                                when (eq key :extras-key)
+                                return value))
+           (value (alist-get extras-key
+                             (alist-get :extra-params org-clock-agg--params))))
+      (message "%s %s" extras-key value)
+      (insert (propertize name 'face 'widget-button) " ")
+      (apply #'widget-create
+             `(,@params
+               :notify org-clock-agg--extras-notify
+               :value ,value))
+      (insert "\n"))))
 
 (defun org-clock-agg--drill-down-p ()
   "Whether the current buffer is drill-down for the previous query."
@@ -1062,12 +1072,7 @@ WIDGET is the instance of the widget that was changed."
     (widget-create 'push-button
                    :notify (lambda (&rest _)
                              (org-clock-agg-save-preset))
-                   "Save preset")
-    (insert " ")
-    (widget-create 'push-button
-                   :notify (lambda (&rest _)
-                             (call-interactively #'org-clock-agg-load-preset))
-                   "Load preset") )
+                   "Save preset"))
   (insert "\n\n")
   (widget-setup))
 
@@ -1452,17 +1457,6 @@ parameter."
          (file-name (read-file-name "Save CSV: " nil "report.csv")))
     (with-temp-file file-name
       (insert csv-string))))
-
-(defun org-clock-agg-load-preset (params)
-  "Load preset on `org-clock-agg' buffer.
-
-See `org-clock-agg' for PARAMS."
-  (interactive (list (let ((preset (completing-read "Preset: " org-clock-agg-presets)))
-                       (alist-get preset org-clock-agg-presets nil nil #'equal))))
-  (unless (derived-mode-p 'org-clock-agg-tree-mode)
-    (user-error "Not in `org-clock-agg-tree-mode'"))
-  (setq-local org-clock-agg--params (copy-tree params))
-  (org-clock-agg-refresh))
 
 (defun org-clock-agg (params)
   "Aggregate org-clock data.
