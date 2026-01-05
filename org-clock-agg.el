@@ -566,6 +566,14 @@ BODY can also contain the following keyword arguments:
                      (seconds-to-time)
                      (format-time-string org-clock-agg-month-format))))
 
+(org-clock-agg-defgroupby year
+  :readable-name "Year"
+  :default-sort start-time
+  (list (thread-last elem
+                     (alist-get :start)
+                     (seconds-to-time)
+                     (format-time-string "%Y"))))
+
 (org-clock-agg-defgroupby todo
   :readable-name "TODO keyword"
   :default-sort total
@@ -1021,7 +1029,6 @@ WIDGET is the instance of the widget that was changed."
                                 return value))
            (value (alist-get extras-key
                              (alist-get :extra-params org-clock-agg--params))))
-      (message "%s %s" extras-key value)
       (insert (propertize name 'face 'widget-button) " ")
       (apply #'widget-create
              `(,@params
@@ -1369,7 +1376,30 @@ ELEMS is a list as described in `org-clock-agg--parse-headline'."
              (outline-path . ,(string-join
                                (org-clock-agg--groupby-outline-path elem nil) "/"))
              (tags . ,(string-join
-                       (org-clock-agg--groupby-tags elem nil) "/")))))
+                       (org-clock-agg--groupby-tags elem nil) "/"))
+             ,@(alist-get :group elem))))
+
+(defun org-clock-agg--elems-with-group-data ()
+  "Return a copy of `org-clock-agg--elems' with groupby data.
+
+The data is added under the `:group' key."
+  (let ((group-functions (alist-get :groupby org-clock-agg--params))
+        (extra-params (alist-get :extra-params org-clock-agg--params)))
+    (mapcar
+     (lambda (elem)
+       (let ((data
+              (mapcar
+               (lambda (fn)
+                 (let* ((res (string-join
+                              (funcall (alist-get
+                                        :function
+                                        (alist-get fn org-clock-agg-groupby-functions))
+                                       elem extra-params)
+                              "/")))
+                   (cons fn (unless (string-empty-p res) res))))
+               group-functions)))
+         (append elem `((:group . ,data)))))
+     (copy-tree org-clock-agg--elems))))
 
 (defun org-clock-agg--csv-alist-to-string (data)
   "Convert DATA to csv string.
@@ -1406,7 +1436,7 @@ attributes."
   (unless org-clock-agg--elems
     (user-error "Nothing found in the current buffer!"))
   (let* ((data (org-clock-agg--csv-elems-to-alist
-                org-clock-agg--elems))
+                (org-clock-agg--elems-with-group-data)))
          (csv-string (org-clock-agg--csv-alist-to-string data))
          (file-name (read-file-name "Save CSV: " nil "report.csv")))
     (with-temp-file file-name
