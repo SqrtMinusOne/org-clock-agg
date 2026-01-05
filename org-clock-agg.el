@@ -885,6 +885,7 @@ TREE is a tree of alists as described in `org-clock-agg--groupby'."
       (evil-define-key* 'normal keymap
         "q" #'org-clock-agg-quit
         "gr" #'org-clock-agg-refresh
+        "gl" #'org-clock-agg-show-level
         "e" #'org-clock-agg-view-elems-at-point
         "d" #'org-clock-agg-drill-down-at-point
         (kbd "<tab>") #'outline-toggle-children))
@@ -1044,19 +1045,29 @@ WIDGET is the instance of the widget that was changed."
   (insert " ")
   (widget-create 'push-button
                  :notify (lambda (&rest _)
+                           (call-interactively #'org-clock-agg-show-level))
+                 "Show level")
+  (insert " ")
+  (widget-create 'push-button
+                 :notify (lambda (&rest _)
                            (org-clock-agg-view-elems))
                  "View records")
   (insert " ")
   (widget-create 'push-button
                  :notify (lambda (&rest _)
                            (org-clock-agg-csv))
-                 "Export records to CSV")
+                 "Export to CSV")
   (insert " ")
   (unless (org-clock-agg--drill-down-p)
     (widget-create 'push-button
                    :notify (lambda (&rest _)
                              (org-clock-agg-save-preset))
-                   "Save preset"))
+                   "Save preset")
+    (insert " ")
+    (widget-create 'push-button
+                   :notify (lambda (&rest _)
+                             (org-clock-agg-load-preset))
+                   "Load preset") )
   (insert "\n\n")
   (widget-setup))
 
@@ -1246,6 +1257,20 @@ elements as well.  LEVEL is the level of the node."
           (org-clock-agg-refresh))
         (goto-char (point-min))))))
 
+(defun org-clock-agg-show-level (level)
+  "Show only headings above or at LEVEL."
+  (interactive (list (let ((number (read-from-minibuffer "Level: ")))
+                       (when (string-match-p (rx bos (+ num) eos) number)
+                         (string-to-number number)))))
+  (unless (derived-mode-p 'org-clock-agg-tree-mode)
+    (user-error "Not in `org-clock-agg-tree-mode'"))
+  (if (not level)
+      (outline-show-all)
+    (save-excursion
+      (outline-hide-sublevels level)
+      (goto-char (point-min))
+      (outline-show-entry))))
+
 (defun org-clock-agg--parse-files (files)
   "Return a list of files to use in the `org-clock-agg' buffer.
 
@@ -1428,6 +1453,17 @@ parameter."
     (with-temp-file file-name
       (insert csv-string))))
 
+(defun org-clock-agg-load-preset (params)
+  "Load preset on `org-clock-agg' buffer.
+
+See `org-clock-agg' for PARAMS."
+  (interactive (list (let ((preset (completing-read "Preset: " org-clock-agg-presets)))
+                       (alist-get preset org-clock-agg-presets nil nil #'equal))))
+  (unless (derived-mode-p 'org-clock-agg-tree-mode)
+    (user-error "Not in `org-clock-agg-tree-mode'"))
+  (setq-local org-clock-agg--params (copy-tree params))
+  (org-clock-agg-refresh))
+
 (defun org-clock-agg (params)
   "Aggregate org-clock data.
 
@@ -1483,7 +1519,7 @@ available group and sort functions; use `org-clock-agg-defgroupby' and
     (switch-to-buffer-other-window buffer)
     (with-current-buffer buffer
       (org-clock-agg-tree-mode)
-      (setq-local org-clock-agg--params params)
+      (setq-local org-clock-agg--params (copy-tree params))
       (let ((inhibit-read-only t))
         (org-clock-agg--render-controls)
         ;; XXX No idea why, but setting these variables with let
