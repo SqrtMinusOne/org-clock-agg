@@ -161,6 +161,21 @@ The formats of %s and %e are controlled by `org-time-stamp-formats'."
   :type 'string
   :group 'org-clock-agg)
 
+(defcustom org-clock-agg-presets
+  `(("Default" . ((:from . -7)
+                  (:to . 0)
+                  (:files . org-agenda)
+                  (:groupby . ,nil)
+                  (:sort . ,nil)
+                  (:sort-order . ,nil)
+                  (:extra-params . ,nil))))
+  "Presets for `org-clock-agg'.
+
+This is an alist, where the keys are preset names, and the values are
+org-clock-agg parameters.  See `org-clock-agg' on the latter."
+  :type '(alist :key-type string)
+  :group 'org-clock-agg)
+
 (defconst org-clock-agg--extra-params-default
   '(("Show records:" . (checkbox :extras-key :show-elems))
     ("Add \"Ungrouped\"" . (checkbox :extras-key :add-ungrouped)))
@@ -1040,8 +1055,8 @@ WIDGET is the instance of the widget that was changed."
   (unless (org-clock-agg--drill-down-p)
     (widget-create 'push-button
                    :notify (lambda (&rest _)
-                             (org-clock-agg-generate-report))
-                   "Create function"))
+                             (org-clock-agg-save-preset))
+                   "Save preset"))
   (insert "\n\n")
   (widget-setup))
 
@@ -1242,55 +1257,62 @@ created by `org-clock-agg--render-controls-files'."
          (alist-get files org-clock-agg-files-preset nil nil #'equal))
         (t files)))
 
-(cl-defun org-clock-agg-exec (from to files groupby sort sort-order extra-params)
+(cl-defun org-clock-agg-exec (params)
   "Aggregate org-clock data and return the result as tree.
 
-See `org-clock-agg' for the meaning of FROM, TO, FILES, GROUPBY, SORT,
-SORT-ORDER, and EXTRA-PARAMS.  See `org-clock-agg--groupby' for the
-return value description."
-  (let* ((files (org-clock-agg--parse-files files))
-         (elems (org-clock-agg--query from to files))
-         (tree (org-clock-agg--groupby elems groupby sort sort-order extra-params))
-         (tree (org-clock-agg--groupby-sort tree)))
-    (cons elems tree)))
+PARAMS is an alist with the following keys:
+- `:from'
+- `:to'
+- `:files'
+- `:groupby'
+- `:sort'
+- `:sort-order'
+- `:extra-params'
+See `org-clock-agg' for parameters description.
+
+See `org-clock-agg--groupby' for the return value description."
+  (cl-destructuring-bind (&key from to files groupby sort sort-order extra-params)
+      (org-clock-agg--alist-to-plist params)
+    (let* ((files (org-clock-agg--parse-files files))
+           (elems (org-clock-agg--query from to files))
+           (tree (org-clock-agg--groupby elems groupby sort sort-order extra-params))
+           (tree (org-clock-agg--groupby-sort tree)))
+      (cons elems tree))))
 
 (defun org-clock-agg-refresh ()
   "Refresh the `org-clock-agg' buffer."
   (interactive)
-  (cl-destructuring-bind (&key from to files groupby sort sort-order extra-params)
-      (org-clock-agg--alist-to-plist org-clock-agg--params)
-    (pcase-let ((`(,elems . ,tree)
-                 (org-clock-agg-exec from to files groupby sort sort-order extra-params)))
-      (setq-local org-clock-agg--elems elems)
-      (setq-local org-clock-agg--tree tree)
-      (save-excursion
-        (let ((inhibit-read-only t))
-          (goto-char (point-min))
-          (search-forward (format "* Results") nil 'noerror)
-          (beginning-of-line)
-          (delete-region (point) (point-max))
-          (dolist (node tree)
-            (org-clock-agg--render-tree-node
-             node
-             (alist-get :show-elems extra-params))))))))
+  (pcase-let ((`(,elems . ,tree)
+               (org-clock-agg-exec org-clock-agg--params)))
+    (setq-local org-clock-agg--elems elems)
+    (setq-local org-clock-agg--tree tree)
+    (save-excursion
+      (let ((inhibit-read-only t))
+        (goto-char (point-min))
+        (search-forward (format "* Results") nil 'noerror)
+        (beginning-of-line)
+        (delete-region (point) (point-max))
+        (dolist (node tree)
+          (org-clock-agg--render-tree-node
+           node
+           (alist-get :show-elems
+                      (alist-get :extra-params org-clock-agg--params))))))))
 
-(defun org-clock-agg-generate-report ()
-  "Generate a report function from the `org-clock-agg' state."
+(defun org-clock-agg-save-preset ()
+  "Generate a command to save the `org-clock-agg' state as preset."
   (interactive)
   (unless (derived-mode-p 'org-clock-agg-tree-mode)
     (user-error "Not in `org-clock-agg-tree-mode'"))
-  (let ((buffer (generate-new-buffer "*org-clock-agg-gen*")))
-    (cl-destructuring-bind (&key from to files groupby sort sort-order extra-params)
-        (org-clock-agg--alist-to-plist org-clock-agg--params)
-      (with-current-buffer buffer
-        (emacs-lisp-mode)
-        (insert
-         ";; Change the function name if necessary\n"
-         (pp-to-string
-          `(defun org-clock-agg-custom-report ()
-             (interactive)
-             (apply #'org-clock-agg
-                    '(,from ,to ,files ,groupby ,sort ,sort-order ,extra-params)))))))
+  (let ((buffer (generate-new-buffer "*org-clock-agg-gen*"))
+        (params org-clock-agg--params))
+    (with-current-buffer buffer
+      (emacs-lisp-mode)
+      (insert
+       ";; Change the preset name\n"
+       (pp-to-string
+        `(setf (alist-get "Preset" org-clock-agg-presets nil nil
+                          #'equal)
+               ',params))))
     (switch-to-buffer buffer)))
 
 (defun org-clock-agg--csv-elems-to-alist (elems)
@@ -1406,37 +1428,40 @@ parameter."
     (with-temp-file file-name
       (insert csv-string))))
 
-(defun org-clock-agg (from to files groupby sort sort-order extra-params)
+(defun org-clock-agg (params)
   "Aggregate org-clock data.
 
 The function creates an interactive buffer for configuring the
 aggregation and displaying the results.  When called
 non-interactively, initial parameters can be passed as arguments.
 
+Runs the command with a prefix argument to select a preset from
+`org-clock-agg-presets'.
+
 Use `org-clock-agg-exec' to retrieve the results without the
-interactive buffer.
+interactive buffer.  PARAMS is an alist with keys described below.
 
-FROM and TO define the time range.  Both are either a relative number
-of days, or a date string parseable by `parse-time-string', with or
-without the time part.  See `org-clock-agg--normalize-time-predicate'
-for details.
+`:from' and `:to' define the time range.  Both are either a relative
+number of days, or a date string parseable by `parse-time-string',
+with or without the time part.  See
+`org-clock-agg--normalize-time-predicate' for details.
 
-FILES is either `org-agenda', a key from `org-clock-agg-files-preset'
+`:files' is either `org-agenda', a key from `org-clock-agg-files-preset'
 \(in which case the value of that variable is used), or a list of
 file paths.
 
-GROUPBY is a list of keys from `org-clock-agg-groupby-functions'.
+`:groupby' is a list of keys from `org-clock-agg-groupby-functions'.
 Each function returns a list of groups for each entry; the result
-forms a tree.  SORT is a list of keys from
-`org-clock-agg-sort-functions', and its length must match GROUPBY.
+forms a tree.  `:sort' is a list of keys from
+`org-clock-agg-sort-functions', and its length must match `:groupby'.
 The Nth entry in SORT defines the sorting logic for the results of the
 Nth GROUPBY function.
 
-SORT-ORDER must be of the same length as SORT.  If the Nth entry is
-non-nil, the sorting is reversed.
+`:sort-order' must be of the same length as `:sort'.  If the Nth entry
+is non-nil, the sorting is reversed.
 
-EXTRA-PARAMS is an alist of \"extra parameters\".  Possible keys are
-defined by `org-clock-agg--extra-params-default' and
+`:extra-params' is an alist of \"extra parameters\".  Possible keys
+are defined by `org-clock-agg--extra-params-default' and
 `org-clock-agg-extra-params'.  Built-in parameters include:
 - `:show-elems' - whether to display raw elements for each group in
   the buffer (an \"element\" represents one org-clock record).
@@ -1449,19 +1474,16 @@ custom aggregation functions to control their behavior at runtime.
 Refer to the mentioned variables and the interactive buffer for
 available group and sort functions; use `org-clock-agg-defgroupby' and
 `org-clock-agg-defsort' to define new ones."
-  (interactive (list -7 0 'org-agenda nil nil nil nil))
+  (interactive (list
+                (let ((preset (if current-prefix-arg
+                                  (completing-read "Preset: " org-clock-agg-presets)
+                                "Default")))
+                  (alist-get preset org-clock-agg-presets nil nil #'equal))))
   (let* ((buffer (generate-new-buffer "*org-clock-agg*")))
     (switch-to-buffer-other-window buffer)
     (with-current-buffer buffer
       (org-clock-agg-tree-mode)
-      (setq-local org-clock-agg--params
-                  `((:from . ,from)
-                    (:to . ,to)
-                    (:files . ,files)
-                    (:groupby . ,groupby)
-                    (:sort . ,sort)
-                    (:sort-order . ,sort-order)
-                    (:extra-params . ,extra-params)))
+      (setq-local org-clock-agg--params params)
       (let ((inhibit-read-only t))
         (org-clock-agg--render-controls)
         ;; XXX No idea why, but setting these variables with let
