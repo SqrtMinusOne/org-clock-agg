@@ -1066,7 +1066,7 @@ WIDGET is the instance of the widget that was changed."
     (insert " ")
     (widget-create 'push-button
                    :notify (lambda (&rest _)
-                             (org-clock-agg-load-preset))
+                             (call-interactively #'org-clock-agg-load-preset))
                    "Load preset") )
   (insert "\n\n")
   (widget-setup))
